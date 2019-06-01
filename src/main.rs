@@ -95,10 +95,6 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     dump_indent(dst, n_indent);
                     dst.push_str("};\n");
                     sidx -= offset;
-                } else {
-                    dump_indent(dst, n_indent);
-                    dst.push_str("s0\n");
-                    n_indent -= 1;
                 }
             }
             inst => write!(dst, "XXX: {:?}\n", inst).unwrap(),
@@ -154,6 +150,10 @@ fn main() -> result::Result<(), Box<error::Error>> {
             }
         }
         dump_body(&mut dst, &module, body);
+        if let Some(_) = ftyp.return_type() {
+            dump_indent(&mut dst, 1);
+            dst.push_str("s0\n");
+        }
         dst.push_str("}\n");
     }
 
