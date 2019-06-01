@@ -18,16 +18,11 @@ fn dump_indent(dst: &mut String, n: usize) {
     }
 }
 
-fn dump_body(dst: &mut String, body: &parity_wasm::elements::FuncBody, mut local_idx: usize) {
-    let mut n_indent = 1;
-    for local in body.locals() {
-        for _ in 0..local.count() {
-            dump_indent(dst, n_indent);
-            write!(dst, "let mut v{}: {} = std::mem::uninitialized();\n", local_idx, type_str(local.value_type())).unwrap();
-            local_idx += 1;
-        }
-    }
+fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &parity_wasm::elements::FuncBody) {
+    let types = module.type_section().unwrap().types();
+    let funcs = module.function_section().unwrap().entries();
 
+    let mut n_indent = 1;
     let mut sidx = 0;
     let mut stack_offsets = Vec::new();
     for inst in body.code().elements() {
@@ -58,8 +53,22 @@ fn dump_body(dst: &mut String, body: &parity_wasm::elements::FuncBody, mut local
                 sidx -= 1;
             }
             Instruction::Call(n) => {
+                let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
+                    parity_wasm::elements::Type::Function(t) => t,
+                };
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = f{}(s{});\n", sidx - 1, n, sidx - 1).unwrap();
+                if let Some(_) = ftyp.return_type() {
+                    write!(dst, "let s{} = ", sidx - ftyp.params().len()).unwrap();
+                }
+                write!(dst, "f{}(", n).unwrap();
+                for _ in ftyp.params() {
+                    write!(dst, "s{},", sidx - 1).unwrap();
+                    sidx -= 1;
+                }
+                dst.push_str(");\n");
+                if let Some(_) = ftyp.return_type() {
+                    sidx += 1;
+                }
             }
             Instruction::If(BlockType::Value(_)) => {
                 dump_indent(dst, n_indent);
@@ -99,24 +108,27 @@ fn dump_body(dst: &mut String, body: &parity_wasm::elements::FuncBody, mut local
 
 fn main() -> result::Result<(), Box<error::Error>> {
     let module = parity_wasm::deserialize_file("res/fac.wasm")?;
-    let type_section = module.type_section().unwrap();
-    let func_section = module.function_section().unwrap();
-    let code_section = module.code_section().unwrap();
-    assert!(func_section.entries().len() == code_section.bodies().len());
+    let types = module.type_section().unwrap().types();
+    let funcs = module.function_section().unwrap().entries();
+    let codes = module.code_section().unwrap().bodies();
+    assert!(funcs.len() == codes.len());
 
     let mut dst = String::new();
     dst.push_str("#![allow(unused_mut)]\n\n");
 
-    for (i, (func, body)) in func_section.entries().iter().zip(code_section.bodies()).enumerate() {
-        let ftyp = match &type_section.types()[func.type_ref() as usize] {
+    for (i, (func, body)) in funcs.iter().zip(codes).enumerate() {
+        let ftyp = match &types[func.type_ref() as usize] {
             parity_wasm::elements::Type::Function(t) => t,
         };
         assert!(ftyp.form() == 0x60);
 
+        // function declaration.
         write!(dst, "fn f{}(", i).unwrap();
-        for (i, param) in ftyp.params().iter().enumerate() {
-            write!(dst, "mut v{}: {}", i, type_str(*param)).unwrap();
-            if i != ftyp.params().len() - 1 {
+        let mut local_idx = 0;
+        for param in ftyp.params() {
+            write!(dst, "mut v{}: {}", local_idx, type_str(*param)).unwrap();
+            local_idx += 1;
+            if local_idx < ftyp.params().len() {
                 dst.push_str(", ");
             }
         }
@@ -125,8 +137,23 @@ fn main() -> result::Result<(), Box<error::Error>> {
             dst.push_str(" -> ");
             dst.push_str(type_str(rtype));
         }
+
+        // function body.
         dst.push_str(" {\n");
-        dump_body(&mut dst, body, ftyp.params().len());
+        for local in body.locals() {
+            for _ in 0..local.count() {
+                dump_indent(&mut dst, 1);
+                write!(
+                    dst,
+                    "let mut v{}: {} = unsafe {{ std::mem::uninitialized() }};\n",
+                    local_idx,
+                    type_str(local.value_type())
+                )
+                .unwrap();
+                local_idx += 1;
+            }
+        }
+        dump_body(&mut dst, &module, body);
         dst.push_str("}\n");
     }
 
