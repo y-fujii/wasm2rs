@@ -51,6 +51,22 @@ fn dump_cmp_op(dst: &mut String, sid: &mut usize, op: &str, n_indent: usize) {
     *sid -= 1;
 }
 
+fn dump_cmp_op_u(dst: &mut String, sid: &mut usize, op: &str, ty: &str, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(
+        dst,
+        "let s{} = (s{} as {} {} s{} as {}) as i32;\n",
+        *sid - 2,
+        *sid - 2,
+        ty,
+        op,
+        *sid - 1,
+        ty,
+    )
+    .unwrap();
+    *sid -= 1;
+}
+
 fn dump_label(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
     dump_indent(dst, n_indent);
     let label = &labels[labels.len() - 1 - n as usize];
@@ -116,10 +132,14 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 write!(dst, "v{} = s{};\n", i, sid - 1).unwrap();
                 sid -= 1;
             }
-            Instruction::GetGlobal(_) => {
+            Instruction::GetGlobal(i) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = G{};\n", sid, i).unwrap();
                 sid += 1;
             }
-            Instruction::SetGlobal(_) => {
+            Instruction::SetGlobal(i) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "unsafe {{ G{} = s{} }};\n", i, sid - 1).unwrap();
                 sid -= 1;
             }
             Instruction::I32Load(_, _) => {}
@@ -137,17 +157,23 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::I32LtS | Instruction::I64LtS => {
                 dump_cmp_op(dst, &mut sid, "<", n_indent);
             }
-            Instruction::I32LtU | Instruction::I64LtU => {
-                sid -= 1;
+            Instruction::I32LeS | Instruction::I64LeS => {
+                dump_cmp_op(dst, &mut sid, "<=", n_indent);
             }
             Instruction::I32GtS | Instruction::I64GtS => {
                 dump_cmp_op(dst, &mut sid, ">", n_indent);
             }
-            Instruction::I32GtU | Instruction::I64GtU => {
-                sid -= 1;
+            Instruction::I32LtU => {
+                dump_cmp_op_u(dst, &mut sid, "<", "u32", n_indent);
             }
-            Instruction::I32LeS | Instruction::I64LeS => {
-                sid -= 1;
+            Instruction::I64LtU => {
+                dump_cmp_op_u(dst, &mut sid, "<", "u64", n_indent);
+            }
+            Instruction::I32GtU => {
+                dump_cmp_op_u(dst, &mut sid, ">", "u32", n_indent);
+            }
+            Instruction::I64GtU => {
+                dump_cmp_op_u(dst, &mut sid, ">", "u64", n_indent);
             }
             Instruction::I32Add | Instruction::I64Add => {
                 dump_bin_op(dst, &mut sid, "+", n_indent);
@@ -158,11 +184,21 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::I32Mul | Instruction::I64Mul => {
                 dump_bin_op(dst, &mut sid, "*", n_indent);
             }
-            Instruction::I32Ctz | Instruction::I64Ctz => {
-                sid -= 1;
+            Instruction::I32Ctz => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{}.trailing_zeros() as i32;\n", sid - 1, sid - 1).unwrap();
             }
-            Instruction::I32Eqz | Instruction::I64Eqz => {
-                sid -= 1;
+            Instruction::I64Ctz => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{}.trailing_zeros() as i64;\n", sid - 1, sid - 1).unwrap();
+            }
+            Instruction::I32Eqz => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = (s{} == 0i32) as i32;\n", sid - 1, sid - 1).unwrap();
+            }
+            Instruction::I64Eqz => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = (s{} == 0i64) as i64;\n", sid - 1, sid - 1).unwrap();
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
