@@ -12,7 +12,7 @@ enum LabelType {
 struct Label {
     id: usize,
     ty: LabelType,
-    arity: usize,
+    arity: usize, // or stack level?
 }
 
 fn type_str(v: parity_wasm::elements::ValueType) -> &'static str {
@@ -239,6 +239,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::Br(n) => {
                 dump_label(dst, &mut sid, &labels, *n, n_indent);
+                // XXX: adjust stack level.
             }
             Instruction::BrIf(n) => {
                 dump_indent(dst, n_indent);
@@ -254,6 +255,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::Return => {
                 dump_indent(dst, n_indent);
                 write!(dst, "return s{};\n", sid - 1).unwrap();
+                // XXX: adjust stack level.
             }
             Instruction::If(ty) => {
                 dump_indent(dst, n_indent);
