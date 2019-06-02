@@ -30,24 +30,24 @@ fn dump_indent(dst: &mut String, n: usize) {
     }
 }
 
-fn dump_bin_op(dst: &mut String, op: &str, sidx: &mut usize, n_indent: usize) {
+fn dump_bin_op(dst: &mut String, op: &str, sid: &mut usize, n_indent: usize) {
     dump_indent(dst, n_indent);
-    write!(dst, "let s{} = s{} {} s{};\n", *sidx - 2, *sidx - 2, op, *sidx - 1).unwrap();
-    *sidx -= 1;
+    write!(dst, "let s{} = s{} {} s{};\n", *sid - 2, *sid - 2, op, *sid - 1).unwrap();
+    *sid -= 1;
 }
 
-fn dump_cmp_op(dst: &mut String, op: &str, sidx: &mut usize, n_indent: usize) {
+fn dump_cmp_op(dst: &mut String, op: &str, sid: &mut usize, n_indent: usize) {
     dump_indent(dst, n_indent);
     write!(
         dst,
         "let s{} = (s{} {} s{}) as i32;\n",
-        *sidx - 2,
-        *sidx - 2,
+        *sid - 2,
+        *sid - 2,
         op,
-        *sidx - 1,
+        *sid - 1,
     )
     .unwrap();
-    *sidx -= 1;
+    *sid -= 1;
 }
 
 fn dump_label(dst: &mut String, labels: &Vec<Label>, n: u32, n_indent: usize) {
@@ -65,48 +65,48 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
     let funcs = module.function_section().unwrap().entries();
 
     let mut n_indent = 1;
-    let mut sidx = 0;
-    let mut lidx = 0;
+    let mut sid = 0;
+    let mut lid = 0;
     let mut labels = Vec::new();
     for inst in body.code().elements() {
         match inst {
             Instruction::GetLocal(i) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = v{};\n", sidx, i).unwrap();
-                sidx += 1;
+                write!(dst, "let s{} = v{};\n", sid, i).unwrap();
+                sid += 1;
             }
             Instruction::SetLocal(i) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "v{} = s{};\n", i, sidx - 1).unwrap();
-                sidx -= 1;
+                write!(dst, "v{} = s{};\n", i, sid - 1).unwrap();
+                sid -= 1;
             }
             Instruction::I32Const(n) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = {}i32;\n", sidx, n).unwrap();
-                sidx += 1;
+                write!(dst, "let s{} = {}i32;\n", sid, n).unwrap();
+                sid += 1;
             }
             Instruction::I64Const(n) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = {}i64;\n", sidx, n).unwrap();
-                sidx += 1;
+                write!(dst, "let s{} = {}i64;\n", sid, n).unwrap();
+                sid += 1;
             }
             Instruction::I32Eq | Instruction::I64Eq => {
-                dump_cmp_op(dst, "==", &mut sidx, n_indent);
+                dump_cmp_op(dst, "==", &mut sid, n_indent);
             }
             Instruction::I32LtS | Instruction::I64LtS => {
-                dump_cmp_op(dst, "<", &mut sidx, n_indent);
+                dump_cmp_op(dst, "<", &mut sid, n_indent);
             }
             Instruction::I32GtS | Instruction::I64GtS => {
-                dump_cmp_op(dst, ">", &mut sidx, n_indent);
+                dump_cmp_op(dst, ">", &mut sid, n_indent);
             }
             Instruction::I32Add | Instruction::I64Add => {
-                dump_bin_op(dst, "+", &mut sidx, n_indent);
+                dump_bin_op(dst, "+", &mut sid, n_indent);
             }
             Instruction::I32Sub | Instruction::I64Sub => {
-                dump_bin_op(dst, "-", &mut sidx, n_indent);
+                dump_bin_op(dst, "-", &mut sid, n_indent);
             }
             Instruction::I32Mul | Instruction::I64Mul => {
-                dump_bin_op(dst, "*", &mut sidx, n_indent);
+                dump_bin_op(dst, "*", &mut sid, n_indent);
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
@@ -114,38 +114,38 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 };
                 dump_indent(dst, n_indent);
                 if let Some(_) = ftyp.return_type() {
-                    write!(dst, "let s{} = ", sidx - ftyp.params().len()).unwrap();
+                    write!(dst, "let s{} = ", sid - ftyp.params().len()).unwrap();
                 }
                 write!(dst, "f{}(", n).unwrap();
                 for _ in ftyp.params() {
-                    write!(dst, "s{},", sidx - 1).unwrap();
-                    sidx -= 1;
+                    write!(dst, "s{},", sid - 1).unwrap();
+                    sid -= 1;
                 }
                 dst.push_str(");\n");
                 if let Some(_) = ftyp.return_type() {
-                    sidx += 1;
+                    sid += 1;
                 }
             }
             Instruction::Block(BlockType::NoResult) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "'l{}: loop {{\n", lidx).unwrap();
+                write!(dst, "'l{}: loop {{\n", lid).unwrap();
                 labels.push(Label {
-                    id: lidx,
+                    id: lid,
                     ty: LabelType::Block,
                     arity: 0,
                 });
-                lidx += 1;
+                lid += 1;
                 n_indent += 1;
             }
             Instruction::Loop(BlockType::NoResult) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "'l{}: loop {{\n", lidx).unwrap();
+                write!(dst, "'l{}: loop {{\n", lid).unwrap();
                 labels.push(Label {
-                    id: lidx,
+                    id: lid,
                     ty: LabelType::Loop,
                     arity: 0,
                 });
-                lidx += 1;
+                lid += 1;
                 n_indent += 1;
             }
             Instruction::Br(n) => {
@@ -153,36 +153,36 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::BrIf(n) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "if s{} != 0i32 {{\n", sidx - 1).unwrap();
+                write!(dst, "if s{} != 0i32 {{\n", sid - 1).unwrap();
                 dump_label(dst, &labels, *n, n_indent + 1);
                 dump_indent(dst, n_indent);
                 dst.push_str("}\n");
-                sidx -= 1;
+                sid -= 1;
             }
             Instruction::If(btyp) => {
                 dump_indent(dst, n_indent);
                 let arity = match btyp {
                     BlockType::NoResult => 0,
                     BlockType::Value(_) => {
-                        write!(dst, "let s{} = ", sidx - 1).unwrap();
+                        write!(dst, "let s{} = ", sid - 1).unwrap();
                         1
                     }
                 };
-                write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lidx, sidx - 1).unwrap();
+                write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lid, sid - 1).unwrap();
                 labels.push(Label {
-                    id: lidx,
+                    id: lid,
                     ty: LabelType::If,
                     arity: arity,
                 });
-                lidx += 1;
-                sidx -= 1;
+                lid += 1;
+                sid -= 1;
                 n_indent += 1;
             }
             Instruction::Else => {
                 if labels.last().unwrap().arity == 1 {
                     dump_indent(dst, n_indent);
-                    write!(dst, "s{}\n", sidx - 1).unwrap();
-                    sidx -= 1;
+                    write!(dst, "s{}\n", sid - 1).unwrap();
+                    sid -= 1;
                 }
                 dump_indent(dst, n_indent - 1);
                 dst.push_str("} else {\n");
@@ -210,8 +210,8 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     LabelType::If => {
                         if label.arity == 1 {
                             dump_indent(dst, n_indent);
-                            write!(dst, "s{}\n", sidx - 1).unwrap();
-                            sidx -= 1;
+                            write!(dst, "s{}\n", sid - 1).unwrap();
+                            sid -= 1;
                         }
                         n_indent -= 1;
                         dump_indent(dst, n_indent);
