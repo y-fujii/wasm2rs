@@ -18,6 +18,26 @@ fn dump_indent(dst: &mut String, n: usize) {
     }
 }
 
+fn dump_bin_op(dst: &mut String, op: &str, sidx: &mut usize, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(dst, "let s{} = s{} {} s{};\n", *sidx - 2, *sidx - 2, op, *sidx - 1).unwrap();
+    *sidx -= 1;
+}
+
+fn dump_cmp_op(dst: &mut String, op: &str, sidx: &mut usize, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(
+        dst,
+        "let s{} = (s{} {} s{}) as i32;\n",
+        *sidx - 2,
+        *sidx - 2,
+        op,
+        *sidx - 1,
+    )
+    .unwrap();
+    *sidx -= 1;
+}
+
 fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &parity_wasm::elements::FuncBody) {
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
@@ -32,25 +52,38 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 write!(dst, "let s{} = v{};\n", sidx, i).unwrap();
                 sidx += 1;
             }
+            Instruction::SetLocal(i) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "v{} = s{};\n", i, sidx - 1).unwrap();
+                sidx -= 1;
+            }
             Instruction::I32Const(n) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "let s{} = {}i32;\n", sidx, n).unwrap();
                 sidx += 1;
             }
-            Instruction::I32Eq => {
+            Instruction::I64Const(n) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = (s{} == s{}) as i32;\n", sidx - 2, sidx - 2, sidx - 1).unwrap();
-                sidx -= 1;
+                write!(dst, "let s{} = {}i64;\n", sidx, n).unwrap();
+                sidx += 1;
             }
-            Instruction::I32Sub => {
-                dump_indent(dst, n_indent);
-                write!(dst, "let s{} = s{} - s{};\n", sidx - 2, sidx - 2, sidx - 1).unwrap();
-                sidx -= 1;
+            Instruction::I32Eq | Instruction::I64Eq => {
+                dump_cmp_op(dst, "==", &mut sidx, n_indent);
             }
-            Instruction::I32Mul => {
-                dump_indent(dst, n_indent);
-                write!(dst, "let s{} = s{} * s{};\n", sidx - 2, sidx - 2, sidx - 1).unwrap();
-                sidx -= 1;
+            Instruction::I32LtS | Instruction::I64LtS => {
+                dump_cmp_op(dst, "<", &mut sidx, n_indent);
+            }
+            Instruction::I32GtS | Instruction::I64GtS => {
+                dump_cmp_op(dst, ">", &mut sidx, n_indent);
+            }
+            Instruction::I32Add | Instruction::I64Add => {
+                dump_bin_op(dst, "+", &mut sidx, n_indent);
+            }
+            Instruction::I32Sub | Instruction::I64Sub => {
+                dump_bin_op(dst, "-", &mut sidx, n_indent);
+            }
+            Instruction::I32Mul | Instruction::I64Mul => {
+                dump_bin_op(dst, "*", &mut sidx, n_indent);
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
@@ -70,34 +103,72 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     sidx += 1;
                 }
             }
-            Instruction::If(BlockType::Value(_)) => {
+            Instruction::Block(BlockType::NoResult) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = if s{} != 0i32 {{\n", sidx - 1, sidx - 1).unwrap();
-                stack_offsets.push(1);
+                dst.push_str("block {\n");
+                stack_offsets.push(0);
+                n_indent += 1;
+            }
+            Instruction::Loop(BlockType::NoResult) => {
+                dump_indent(dst, n_indent);
+                dst.push_str("loop {\n");
+                stack_offsets.push(0);
+                n_indent += 1;
+            }
+            Instruction::Br(n) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "break 'l{};\n", n).unwrap();
+            }
+            Instruction::BrIf(n) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "if s{} != 0i32 {{\n", sidx - 1).unwrap();
+                dump_indent(dst, n_indent + 1);
+                write!(dst, "break 'l{};\n", n).unwrap();
+                dump_indent(dst, n_indent);
+                dst.push_str("}\n");
+                sidx -= 1;
+            }
+            Instruction::If(btyp) => {
+                dump_indent(dst, n_indent);
+                match btyp {
+                    BlockType::NoResult => {
+                        stack_offsets.push(0);
+                    }
+                    BlockType::Value(_) => {
+                        write!(dst, "let s{} = ", sidx - 1).unwrap();
+                        stack_offsets.push(1);
+                    }
+                }
+                write!(dst, "if s{} != 0i32 {{\n", sidx - 1).unwrap();
                 sidx -= 1;
                 n_indent += 1;
             }
             Instruction::Else => {
-                let offset = *stack_offsets.last().unwrap();
-                if offset == 1 {
+                if *stack_offsets.last().unwrap() == 1 {
                     dump_indent(dst, n_indent);
                     write!(dst, "s{}\n", sidx - 1).unwrap();
+                    sidx -= 1;
                 }
                 dump_indent(dst, n_indent - 1);
                 dst.push_str("} else {\n");
-                sidx -= offset;
             }
             Instruction::End => {
-                if let Some(offset) = stack_offsets.pop() {
+                let n = match stack_offsets.pop() {
+                    Some(n) => n,
+                    None => continue,
+                };
+                if n == 1 {
                     dump_indent(dst, n_indent);
                     write!(dst, "s{}\n", sidx - 1).unwrap();
-                    n_indent -= 1;
-                    dump_indent(dst, n_indent);
-                    dst.push_str("};\n");
-                    sidx -= offset;
+                    sidx -= 1;
                 }
+                n_indent -= 1;
+                dump_indent(dst, n_indent);
+                dst.push_str("};\n");
             }
-            inst => write!(dst, "XXX: {:?}\n", inst).unwrap(),
+            inst => {
+                panic!("{:?}", inst);
+            }
         }
     }
 }
@@ -110,7 +181,7 @@ fn main() -> result::Result<(), Box<error::Error>> {
     assert!(funcs.len() == codes.len());
 
     let mut dst = String::new();
-    dst.push_str("#![allow(unused_mut)]\n\n");
+    dst.push_str("#![allow(unused_mut)]\n");
 
     for (i, (func, body)) in funcs.iter().zip(codes).enumerate() {
         let ftyp = match &types[func.type_ref() as usize] {
@@ -119,7 +190,7 @@ fn main() -> result::Result<(), Box<error::Error>> {
         assert!(ftyp.form() == 0x60);
 
         // function declaration.
-        write!(dst, "fn f{}(", i).unwrap();
+        write!(dst, "\nfn f{}(", i).unwrap();
         let mut local_idx = 0;
         for param in ftyp.params() {
             write!(dst, "mut v{}: {}", local_idx, type_str(*param)).unwrap();
