@@ -10,7 +10,7 @@ enum LabelType {
 }
 
 struct Label {
-    id: usize,
+    lid: usize,
     ty: LabelType,
     arity: usize,
     sid: usize,
@@ -83,19 +83,23 @@ fn dump_cmp_op_u_lt(dst: &mut String, sid: &mut usize, ty: &str, n_indent: usize
     *sid -= 1;
 }
 
-fn dump_jump(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
+fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
     dump_indent(dst, n_indent);
     let label = &labels[labels.len() - 1 - n as usize];
-    let stmt = match label.ty {
-        LabelType::Block => "break",
-        LabelType::Loop => "continue",
-        LabelType::If => "break",
-    };
-    write!(dst, "{} 'l{}", stmt, label.id).unwrap();
-    if label.arity == 1 {
-        write!(dst, " s{}", *sid - 1).unwrap();
+    match label.ty {
+        LabelType::Block | LabelType::If => {
+            assert!(label.sid + label.arity == sid);
+            write!(dst, "break 'l{}", label.lid).unwrap();
+            if label.arity == 1 {
+                write!(dst, " s{}", sid - 1).unwrap();
+            }
+            dst.push_str(";\n");
+        }
+        LabelType::Loop => {
+            assert!(label.sid == sid);
+            write!(dst, "continue 'l{};\n", label.lid).unwrap();
+        }
     }
-    dst.push_str(";\n");
 }
 
 fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
@@ -318,7 +322,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 };
                 write!(dst, "'l{}: loop {{\n", lid).unwrap();
                 labels.push(Label {
-                    id: lid,
+                    lid: lid,
                     ty: LabelType::Block,
                     arity: arity,
                     sid: sid,
@@ -337,7 +341,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 };
                 write!(dst, "'l{}: loop {{\n", lid).unwrap();
                 labels.push(Label {
-                    id: lid,
+                    lid: lid,
                     ty: LabelType::Loop,
                     arity: arity,
                     sid: sid,
@@ -346,14 +350,14 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 n_indent += 1;
             }
             Instruction::Br(n) => {
-                dump_jump(dst, &mut sid, &labels, *n, n_indent);
+                dump_jump(dst, sid, &labels, *n, n_indent);
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::BrIf(n) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "if s{} != 0i32 {{\n", sid - 1).unwrap();
                 sid -= 1;
-                dump_jump(dst, &mut sid, &labels, *n, n_indent + 1);
+                dump_jump(dst, sid, &labels, *n, n_indent + 1);
                 dump_indent(dst, n_indent);
                 dst.push_str("}\n");
             }
@@ -377,7 +381,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lid, sid - 1).unwrap();
                 sid -= 1;
                 labels.push(Label {
-                    id: lid,
+                    lid: lid,
                     ty: LabelType::If,
                     arity: arity,
                     sid: sid,
@@ -401,6 +405,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     Some(e) => e,
                     None => continue, // XXX: check sid.
                 };
+                assert!(label.sid + label.arity == sid);
                 match label.ty {
                     LabelType::Block | LabelType::Loop => {
                         dump_indent(dst, n_indent);
