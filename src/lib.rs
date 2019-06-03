@@ -12,7 +12,8 @@ enum LabelType {
 struct Label {
     id: usize,
     ty: LabelType,
-    arity: usize, // or stack level?
+    arity: usize,
+    sid: usize,
 }
 
 fn type_str(v: parity_wasm::elements::ValueType) -> &'static str {
@@ -82,7 +83,7 @@ fn dump_cmp_op_u_lt(dst: &mut String, sid: &mut usize, ty: &str, n_indent: usize
     *sid -= 1;
 }
 
-fn dump_label(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
+fn dump_jump(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
     dump_indent(dst, n_indent);
     let label = &labels[labels.len() - 1 - n as usize];
     let stmt = match label.ty {
@@ -97,6 +98,45 @@ fn dump_label(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_
     dst.push_str(";\n");
 }
 
+fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
+    dst: &mut String,
+    sid: &mut usize,
+    labels: &mut Vec<Label>,
+    n_indent: &mut usize,
+    inst_it: &mut T,
+) {
+    while let Some(inst) = inst_it.next() {
+        match inst {
+            Instruction::Else => {
+                let label = labels.last().unwrap();
+                *sid = label.sid + label.arity;
+                dump_indent(dst, *n_indent - 1);
+                dst.push_str("} else {\n");
+                break;
+            }
+            Instruction::End => {
+                let label = match labels.pop() {
+                    Some(e) => e,
+                    None => return, // XXX
+                };
+                *sid = label.sid + label.arity;
+                *n_indent -= 1;
+                dump_indent(dst, *n_indent);
+                match label.ty {
+                    LabelType::Block | LabelType::Loop => {
+                        dst.push_str("};\n");
+                    }
+                    LabelType::If => {
+                        dst.push_str("}; };\n");
+                    }
+                }
+                break;
+            }
+            _ => (),
+        }
+    }
+}
+
 fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &parity_wasm::elements::FuncBody) {
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
@@ -105,7 +145,8 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
     let mut sid = 0;
     let mut lid = 0;
     let mut labels = Vec::new();
-    for inst in body.code().elements() {
+    let mut inst_it = body.code().elements().iter();
+    while let Some(inst) = inst_it.next() {
         match inst {
             Instruction::Nop => {}
             Instruction::Drop => {
@@ -170,14 +211,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::I32Store(_, offset) => {
                 dump_indent(dst, n_indent);
-                write!(
-                    dst,
-                    "*(({} + s{}) as *mut i32) = s{};\n",
-                    offset,
-                    sid - 2,
-                    sid - 1
-                )
-                .unwrap();
+                write!(dst, "*(({} + s{}) as *mut i32) = s{};\n", offset, sid - 2, sid - 1).unwrap();
                 sid -= 2;
             }
             Instruction::TeeLocal(i) => {
@@ -287,6 +321,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     id: lid,
                     ty: LabelType::Block,
                     arity: arity,
+                    sid: sid,
                 });
                 lid += 1;
                 n_indent += 1;
@@ -305,29 +340,30 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     id: lid,
                     ty: LabelType::Loop,
                     arity: arity,
+                    sid: sid,
                 });
                 lid += 1;
                 n_indent += 1;
             }
             Instruction::Br(n) => {
-                dump_label(dst, &mut sid, &labels, *n, n_indent);
-                // XXX: adjust stack level.
+                dump_jump(dst, &mut sid, &labels, *n, n_indent);
+                skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::BrIf(n) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "if s{} != 0i32 {{\n", sid - 1).unwrap();
                 sid -= 1;
-                dump_label(dst, &mut sid, &labels, *n, n_indent + 1);
+                dump_jump(dst, &mut sid, &labels, *n, n_indent + 1);
                 dump_indent(dst, n_indent);
                 dst.push_str("}\n");
             }
             Instruction::BrTable(_) => {
-                sid -= 1;
+                skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::Return => {
                 dump_indent(dst, n_indent);
                 write!(dst, "return s{};\n", sid - 1).unwrap();
-                // XXX: adjust stack level.
+                skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::If(ty) => {
                 dump_indent(dst, n_indent);
@@ -339,17 +375,20 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     }
                 };
                 write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lid, sid - 1).unwrap();
+                sid -= 1;
                 labels.push(Label {
                     id: lid,
                     ty: LabelType::If,
                     arity: arity,
+                    sid: sid,
                 });
                 lid += 1;
-                sid -= 1;
                 n_indent += 1;
             }
             Instruction::Else => {
-                if labels.last().unwrap().arity == 1 {
+                let label = labels.last().unwrap();
+                assert!(label.sid + label.arity == sid);
+                if label.arity == 1 {
                     dump_indent(dst, n_indent);
                     write!(dst, "s{}\n", sid - 1).unwrap();
                     sid -= 1;
@@ -360,7 +399,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::End => {
                 let label = match labels.pop() {
                     Some(e) => e,
-                    None => continue,
+                    None => continue, // XXX: check sid.
                 };
                 match label.ty {
                     LabelType::Block | LabelType::Loop => {
