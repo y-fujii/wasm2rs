@@ -149,19 +149,19 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::GetGlobal(i) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = unsafe {{ G{} }};\n", sid, i).unwrap();
+                write!(dst, "let s{} = G{};\n", sid, i).unwrap();
                 sid += 1;
             }
             Instruction::SetGlobal(i) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "unsafe {{ G{} = s{} }};\n", i, sid - 1).unwrap();
+                write!(dst, "G{} = s{};\n", i, sid - 1).unwrap();
                 sid -= 1;
             }
             Instruction::I32Load(_, offset) => {
                 dump_indent(dst, n_indent);
                 write!(
                     dst,
-                    "let s{} = unsafe {{ *(({} + s{}) as *const i32) }};\n",
+                    "let s{} = *(({} + s{}) as *const i32);\n",
                     sid - 1,
                     offset,
                     sid - 1
@@ -172,7 +172,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dump_indent(dst, n_indent);
                 write!(
                     dst,
-                    "unsafe {{ *(({} + s{}) as *mut i32) = s{} }};\n",
+                    "*(({} + s{}) as *mut i32) = s{};\n",
                     offset,
                     sid - 2,
                     sid - 1
@@ -423,7 +423,7 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
         assert!(ftyp.form() == 0x60);
 
         // function declaration.
-        write!(dst, "\nfn f{}(", i).unwrap();
+        write!(dst, "\nunsafe fn f{}(", i).unwrap();
         let mut local_idx = 0;
         for param in ftyp.params() {
             write!(dst, "mut v{}: {}", local_idx, type_str(*param)).unwrap();
@@ -445,7 +445,7 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
                 dump_indent(dst, 1);
                 write!(
                     dst,
-                    "let mut v{}: {} = unsafe {{ std::mem::uninitialized() }};\n",
+                    "let mut v{}: {} = core::mem::uninitialized();\n",
                     local_idx,
                     type_str(local.value_type())
                 )
