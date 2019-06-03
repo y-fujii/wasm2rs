@@ -3,12 +3,14 @@ use parity_wasm::elements::{BlockType, Instruction, ValueType};
 use std::fmt::Write;
 use std::*;
 
+#[derive(Clone, Copy)]
 enum LabelType {
     Block,
     Loop,
     If,
 }
 
+#[derive(Clone)]
 struct Label {
     lid: usize,
     ty: LabelType,
@@ -102,6 +104,34 @@ fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent
     }
 }
 
+fn dump_label(
+    dst: &mut String,
+    sid: usize,
+    lid: &mut usize,
+    labels: &mut Vec<Label>,
+    n_indent: &mut usize,
+    block_ty: &BlockType,
+    label_ty: LabelType,
+) {
+    dump_indent(dst, *n_indent);
+    let arity = match block_ty {
+        BlockType::NoResult => 0,
+        BlockType::Value(value_ty) => {
+            write!(dst, "let s{}: {} = ", sid, type_str(*value_ty)).unwrap();
+            1
+        }
+    };
+    write!(dst, "'l{}: loop {{\n", lid).unwrap();
+    labels.push(Label {
+        lid: *lid,
+        ty: label_ty,
+        arity: arity,
+        sid: sid,
+    });
+    *lid += 1;
+    *n_indent += 1;
+}
+
 fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
     dst: &mut String,
     sid: &mut usize,
@@ -153,6 +183,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
     while let Some(inst) = inst_it.next() {
         match inst {
             Instruction::Nop => {}
+            Instruction::Unreachable => {}
             Instruction::Drop => {
                 sid -= 1;
             }
@@ -180,6 +211,16 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::I64Const(n) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "let s{} = {}i64;\n", sid, n).unwrap();
+                sid += 1;
+            }
+            Instruction::F32Const(n) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = f32::from_bits({});\n", sid, n).unwrap();
+                sid += 1;
+            }
+            Instruction::F64Const(n) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = f64::from_bits({});\n", sid, n).unwrap();
                 sid += 1;
             }
             Instruction::GetLocal(i) => {
@@ -222,19 +263,19 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dump_indent(dst, n_indent);
                 write!(dst, "v{} = s{};\n", i, sid - 1).unwrap();
             }
-            Instruction::I32Eq | Instruction::I64Eq => {
+            Instruction::I32Eq | Instruction::I64Eq | Instruction::F32Eq | Instruction::F64Eq => {
                 dump_cmp_op(dst, &mut sid, "==", n_indent);
             }
-            Instruction::I32Ne | Instruction::I64Ne => {
+            Instruction::I32Ne | Instruction::I64Ne | Instruction::F32Ne | Instruction::F64Ne => {
                 dump_cmp_op(dst, &mut sid, "!=", n_indent);
             }
-            Instruction::I32LtS | Instruction::I64LtS => {
+            Instruction::I32LtS | Instruction::I64LtS | Instruction::F32Lt | Instruction::F64Lt => {
                 dump_cmp_op(dst, &mut sid, "<", n_indent);
             }
-            Instruction::I32LeS | Instruction::I64LeS => {
+            Instruction::I32LeS | Instruction::I64LeS | Instruction::F32Le | Instruction::F64Le => {
                 dump_cmp_op(dst, &mut sid, "<=", n_indent);
             }
-            Instruction::I32GtS | Instruction::I64GtS => {
+            Instruction::I32GtS | Instruction::I64GtS | Instruction::F32Gt | Instruction::F64Gt => {
                 dump_cmp_op(dst, &mut sid, ">", n_indent);
             }
             Instruction::I32LtU => {
@@ -249,14 +290,17 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::I64GtU => {
                 dump_cmp_op_u(dst, &mut sid, ">", "u64", n_indent);
             }
-            Instruction::I32Add | Instruction::I64Add => {
+            Instruction::I32Add | Instruction::I64Add | Instruction::F32Add | Instruction::F64Add => {
                 dump_bin_op(dst, &mut sid, "+", n_indent);
             }
-            Instruction::I32Sub | Instruction::I64Sub => {
+            Instruction::I32Sub | Instruction::I64Sub | Instruction::F32Sub | Instruction::F64Sub => {
                 dump_bin_op(dst, &mut sid, "-", n_indent);
             }
-            Instruction::I32Mul | Instruction::I64Mul => {
+            Instruction::I32Mul | Instruction::I64Mul | Instruction::F32Mul | Instruction::F64Mul => {
                 dump_bin_op(dst, &mut sid, "*", n_indent);
+            }
+            Instruction::I32DivS | Instruction::I64DivS | Instruction::F32Div | Instruction::F64Div => {
+                dump_bin_op(dst, &mut sid, "/", n_indent);
             }
             Instruction::I32Ctz => {
                 dump_indent(dst, n_indent);
@@ -272,7 +316,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::I64Eqz => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = (s{} == 0i64) as i64;\n", sid - 1, sid - 1).unwrap();
+                write!(dst, "let s{} = (s{} == 0i64) as i32;\n", sid - 1, sid - 1).unwrap();
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
@@ -300,7 +344,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid - ftyp.params().len() - 1).unwrap();
                 }
-                write!(dst, "func_table[s{} as usize](", sid - 1).unwrap();
+                write!(dst, "// func_table[s{} as usize](", sid - 1).unwrap();
                 sid -= 1;
                 for _ in ftyp.params() {
                     write!(dst, "s{},", sid - 1).unwrap();
@@ -312,42 +356,10 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 }
             }
             Instruction::Block(ty) => {
-                dump_indent(dst, n_indent);
-                let arity = match ty {
-                    BlockType::NoResult => 0,
-                    BlockType::Value(_) => {
-                        write!(dst, "let s{} = ", sid).unwrap();
-                        1
-                    }
-                };
-                write!(dst, "'l{}: loop {{\n", lid).unwrap();
-                labels.push(Label {
-                    lid: lid,
-                    ty: LabelType::Block,
-                    arity: arity,
-                    sid: sid,
-                });
-                lid += 1;
-                n_indent += 1;
+                dump_label(dst, sid, &mut lid, &mut labels, &mut n_indent, ty, LabelType::Block);
             }
             Instruction::Loop(ty) => {
-                dump_indent(dst, n_indent);
-                let arity = match ty {
-                    BlockType::NoResult => 0,
-                    BlockType::Value(_) => {
-                        write!(dst, "let s{} = ", sid).unwrap();
-                        1
-                    }
-                };
-                write!(dst, "'l{}: loop {{\n", lid).unwrap();
-                labels.push(Label {
-                    lid: lid,
-                    ty: LabelType::Loop,
-                    arity: arity,
-                    sid: sid,
-                });
-                lid += 1;
-                n_indent += 1;
+                dump_label(dst, sid, &mut lid, &mut labels, &mut n_indent, ty, LabelType::Loop);
             }
             Instruction::Br(n) => {
                 dump_jump(dst, sid, &labels, *n, n_indent);
@@ -369,12 +381,12 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 write!(dst, "return s{};\n", sid - 1).unwrap();
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
-            Instruction::If(ty) => {
+            Instruction::If(block_ty) => {
                 dump_indent(dst, n_indent);
-                let arity = match ty {
+                let arity = match block_ty {
                     BlockType::NoResult => 0,
-                    BlockType::Value(_) => {
-                        write!(dst, "let s{} = ", sid - 1).unwrap();
+                    BlockType::Value(value_ty) => {
+                        write!(dst, "let s{}: {} = ", sid - 1, type_str(*value_ty)).unwrap();
                         1
                     }
                 };
@@ -449,8 +461,8 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
             match global.init_expr().code() {
                 [Instruction::I32Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
                 [Instruction::I64Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
-                [Instruction::F32Const(x), Instruction::End] => write!(dst, " = {};\n", x).unwrap(),
-                [Instruction::F64Const(x), Instruction::End] => write!(dst, " = {};\n", x).unwrap(),
+                [Instruction::F32Const(n), Instruction::End] => write!(dst, " = f32::from_bits({});\n", n).unwrap(),
+                [Instruction::F64Const(n), Instruction::End] => write!(dst, " = f32::from_bits({});\n", n).unwrap(),
                 _ => panic!(),
             }
         }
