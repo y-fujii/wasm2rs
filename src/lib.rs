@@ -143,7 +143,7 @@ fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
         match inst {
             Instruction::Else => {
                 let label = labels.last().unwrap();
-                *sid = label.sid + label.arity;
+                *sid = label.sid;
                 dump_indent(dst, *n_indent - 1);
                 dst.push_str("} else {\n");
                 break;
