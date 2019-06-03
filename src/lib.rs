@@ -90,8 +90,8 @@ fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent
     let label = &labels[labels.len() - 1 - n as usize];
     match label.ty {
         LabelType::Block | LabelType::If => {
-            // XXX
-            assert!(label.sid + label.arity == sid);
+            // br instruction allows to resize the stack.
+            //assert!(label.sid + label.arity == sid);
             write!(dst, "break 'l{}", label.lid).unwrap();
             if label.arity == 1 {
                 write!(dst, " s{}", sid - 1).unwrap();
@@ -99,7 +99,8 @@ fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent
             dst.push_str(";\n");
         }
         LabelType::Loop => {
-            assert!(label.sid == sid);
+            // br instruction allows to resize the stack.
+            //assert!(label.sid == sid);
             write!(dst, "continue 'l{};\n", label.lid).unwrap();
         }
     }
@@ -189,7 +190,6 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 sid -= 1;
             }
             Instruction::GrowMemory(_) => {
-                sid -= 1;
             }
             Instruction::Select => {
                 dump_indent(dst, n_indent);
@@ -255,9 +255,30 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 )
                 .unwrap();
             }
+            Instruction::I32Load8S(_, offset) => {
+                dump_indent(dst, n_indent);
+                write!(
+                    dst,
+                    "let s{} = *(({} + s{}) as *const i8) as i32;\n",
+                    sid - 1,
+                    offset,
+                    sid - 1
+                )
+                .unwrap();
+            }
             Instruction::I32Store(_, offset) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "*(({} + s{}) as *mut i32) = s{};\n", offset, sid - 2, sid - 1).unwrap();
+                sid -= 2;
+            }
+            Instruction::I32Store8(_, offset) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "*(({} + s{}) as *mut i8) = s{} as i8;\n", offset, sid - 2, sid - 1).unwrap();
+                sid -= 2;
+            }
+            Instruction::I32Store16(_, offset) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "*(({} + s{}) as *mut i16) = s{} as i16;\n", offset, sid - 2, sid - 1).unwrap();
                 sid -= 2;
             }
             Instruction::TeeLocal(i) => {
@@ -290,6 +311,16 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::I64GtU => {
                 dump_cmp_op_u(dst, &mut sid, ">", "u64", n_indent);
+            }
+            Instruction::I32LeU => {
+                dump_cmp_op_u(dst, &mut sid, "<=", "u32", n_indent);
+            }
+            Instruction::I64LeU => {
+                dump_cmp_op_u(dst, &mut sid, "<=", "u64", n_indent);
+            }
+            Instruction::F32Neg | Instruction::F64Neg => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = -s{};\n", sid - 1, sid - 1).unwrap();
             }
             Instruction::I32Add | Instruction::I64Add | Instruction::F32Add | Instruction::F64Add => {
                 dump_bin_op(dst, &mut sid, "+", n_indent);
@@ -342,10 +373,12 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                     parity_wasm::elements::Type::Function(t) => t,
                 };
                 dump_indent(dst, n_indent);
+                // XXX
+                dst.push_str("// ");
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid - ftyp.params().len() - 1).unwrap();
                 }
-                write!(dst, "// func_table[s{} as usize](", sid - 1).unwrap();
+                write!(dst, "func_table[s{} as usize](", sid - 1).unwrap();
                 sid -= 1;
                 for _ in ftyp.params() {
                     write!(dst, "s{},", sid - 1).unwrap();
