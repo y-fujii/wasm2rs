@@ -157,8 +157,29 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 write!(dst, "unsafe {{ G{} = s{} }};\n", i, sid - 1).unwrap();
                 sid -= 1;
             }
-            Instruction::I32Load(_, _) => {}
-            Instruction::I32Store(_, _) => {}
+            Instruction::I32Load(_, offset) => {
+                dump_indent(dst, n_indent);
+                write!(
+                    dst,
+                    "let s{} = unsafe {{ *(({} + s{}) as *const i32) }};\n",
+                    sid - 1,
+                    offset,
+                    sid - 1
+                )
+                .unwrap();
+            }
+            Instruction::I32Store(_, offset) => {
+                dump_indent(dst, n_indent);
+                write!(
+                    dst,
+                    "unsafe {{ *(({} + s{}) as *mut i32) = s{} }};\n",
+                    offset,
+                    sid - 2,
+                    sid - 1
+                )
+                .unwrap();
+                sid -= 2;
+            }
             Instruction::TeeLocal(i) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "v{} = s{};\n", i, sid - 1).unwrap();
@@ -374,14 +395,13 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
 
 fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
     if let Some(globals) = module.global_section() {
-        write!(dst, "\n").unwrap();
         for (i, global) in globals.entries().iter().enumerate() {
-            write!(dst, "static");
+            write!(dst, "static").unwrap();
             if global.global_type().is_mutable() {
-                write!(dst, " mut");
+                write!(dst, " mut").unwrap();
             }
             let ty = global.global_type().content_type();
-            write!(dst, " G{}: {}", i, type_str(ty));
+            write!(dst, " G{}: {}", i, type_str(ty)).unwrap();
             match global.init_expr().code() {
                 [Instruction::I32Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
                 [Instruction::I64Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
@@ -449,6 +469,8 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
     dst.push_str("#![allow(unreachable_code)]\n");
     dst.push_str("#![allow(unused_assignments)]\n");
     dst.push_str("#![allow(unused_variables)]\n");
+    dst.push_str("#![allow(dead_code)]\n");
+    dst.push_str("\n");
     dump_module(&mut dst, &module);
     Ok(dst)
 }
