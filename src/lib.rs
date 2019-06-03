@@ -3,7 +3,7 @@ use parity_wasm::elements::{BlockType, Instruction, ValueType};
 use std::fmt::Write;
 use std::*;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LabelType {
     Block,
     Loop,
@@ -141,16 +141,28 @@ fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
     n_indent: &mut usize,
     inst_it: &mut T,
 ) {
+    let mut depth = 0;
     while let Some(inst) = inst_it.next() {
         match inst {
+            Instruction::Block(_) | Instruction::Loop(_) | Instruction::If(_) => {
+                depth += 1;
+            }
             Instruction::Else => {
+                if depth > 0 {
+                    continue;
+                }
                 let label = labels.last().unwrap();
+                assert!(label.ty == LabelType::If);
                 *sid = label.sid;
                 dump_indent(dst, *n_indent - 1);
                 dst.push_str("} else {\n");
                 break;
             }
             Instruction::End => {
+                if depth > 0 {
+                    depth -= 1;
+                    continue;
+                }
                 let label = match labels.pop() {
                     Some(e) => e,
                     None => return, // XXX
@@ -437,6 +449,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::Else => {
                 let label = labels.last().unwrap();
+                assert!(label.ty == LabelType::If);
                 assert!(label.sid + label.arity == sid);
                 if label.arity == 1 {
                     dump_indent(dst, n_indent);
