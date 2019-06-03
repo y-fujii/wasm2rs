@@ -67,6 +67,21 @@ fn dump_cmp_op_u(dst: &mut String, sid: &mut usize, op: &str, ty: &str, n_indent
     *sid -= 1;
 }
 
+fn dump_cmp_op_u_lt(dst: &mut String, sid: &mut usize, ty: &str, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(
+        dst,
+        "let s{} = ((s{} as {}) < s{} as {}) as i32;\n",
+        *sid - 2,
+        *sid - 2,
+        ty,
+        *sid - 1,
+        ty,
+    )
+    .unwrap();
+    *sid -= 1;
+}
+
 fn dump_label(dst: &mut String, sid: &mut usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
     dump_indent(dst, n_indent);
     let label = &labels[labels.len() - 1 - n as usize];
@@ -103,7 +118,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dump_indent(dst, n_indent);
                 write!(
                     dst,
-                    "let s{} = if s{} {{ s{} }} else {{ s{} }};\n",
+                    "let s{} = if s{} != 0i32 {{ s{} }} else {{ s{} }};\n",
                     sid - 3,
                     sid - 3,
                     sid - 2,
@@ -134,7 +149,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::GetGlobal(i) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "let s{} = G{};\n", sid, i).unwrap();
+                write!(dst, "let s{} = unsafe {{ G{} }};\n", sid, i).unwrap();
                 sid += 1;
             }
             Instruction::SetGlobal(i) => {
@@ -164,10 +179,10 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dump_cmp_op(dst, &mut sid, ">", n_indent);
             }
             Instruction::I32LtU => {
-                dump_cmp_op_u(dst, &mut sid, "<", "u32", n_indent);
+                dump_cmp_op_u_lt(dst, &mut sid, "u32", n_indent);
             }
             Instruction::I64LtU => {
-                dump_cmp_op_u(dst, &mut sid, "<", "u64", n_indent);
+                dump_cmp_op_u_lt(dst, &mut sid, "u64", n_indent);
             }
             Instruction::I32GtU => {
                 dump_cmp_op_u(dst, &mut sid, ">", "u32", n_indent);
@@ -366,6 +381,7 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
     dst.push_str("#![allow(unused_mut)]\n");
     dst.push_str("#![allow(unreachable_code)]\n");
     dst.push_str("#![allow(unused_assignments)]\n");
+    dst.push_str("#![allow(unused_variables)]\n");
 
     for (i, (func, body)) in funcs.iter().zip(codes).enumerate() {
         let ftyp = match &types[func.type_ref() as usize] {
