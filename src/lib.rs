@@ -3,14 +3,14 @@ use parity_wasm::elements::{BlockType, Instruction, ValueType};
 use std::fmt::Write;
 use std::*;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum LabelType {
     Block,
     Loop,
     If,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Label {
     lid: usize,
     ty: LabelType,
@@ -90,6 +90,7 @@ fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent
     let label = &labels[labels.len() - 1 - n as usize];
     match label.ty {
         LabelType::Block | LabelType::If => {
+            // XXX
             assert!(label.sid + label.arity == sid);
             write!(dst, "break 'l{}", label.lid).unwrap();
             if label.arity == 1 {
@@ -407,7 +408,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 if label.arity == 1 {
                     dump_indent(dst, n_indent);
                     write!(dst, "s{}\n", sid - 1).unwrap();
-                    sid -= 1;
+                    sid = label.sid;
                 }
                 dump_indent(dst, n_indent - 1);
                 dst.push_str("} else {\n");
@@ -434,7 +435,6 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                         if label.arity == 1 {
                             dump_indent(dst, n_indent);
                             write!(dst, "s{}\n", sid - 1).unwrap();
-                            sid -= 1;
                         }
                         n_indent -= 1;
                         dump_indent(dst, n_indent);
