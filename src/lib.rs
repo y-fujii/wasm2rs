@@ -373,16 +373,29 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
 }
 
 fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
+    if let Some(globals) = module.global_section() {
+        write!(dst, "\n").unwrap();
+        for (i, global) in globals.entries().iter().enumerate() {
+            write!(dst, "static");
+            if global.global_type().is_mutable() {
+                write!(dst, " mut");
+            }
+            let ty = global.global_type().content_type();
+            write!(dst, " G{}: {}", i, type_str(ty));
+            match global.init_expr().code() {
+                [Instruction::I32Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
+                [Instruction::I64Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
+                [Instruction::F32Const(x), Instruction::End] => write!(dst, " = {};\n", x).unwrap(),
+                [Instruction::F64Const(x), Instruction::End] => write!(dst, " = {};\n", x).unwrap(),
+                _ => panic!(),
+            }
+        }
+    }
+
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
     let codes = module.code_section().unwrap().bodies();
     assert!(funcs.len() == codes.len());
-
-    dst.push_str("#![allow(unused_mut)]\n");
-    dst.push_str("#![allow(unreachable_code)]\n");
-    dst.push_str("#![allow(unused_assignments)]\n");
-    dst.push_str("#![allow(unused_variables)]\n");
-
     for (i, (func, body)) in funcs.iter().zip(codes).enumerate() {
         let ftyp = match &types[func.type_ref() as usize] {
             parity_wasm::elements::Type::Function(t) => t,
@@ -432,6 +445,10 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
 pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<String, Error> {
     let module = parity_wasm::deserialize_file(path)?;
     let mut dst = String::new();
+    dst.push_str("#![allow(unused_mut)]\n");
+    dst.push_str("#![allow(unreachable_code)]\n");
+    dst.push_str("#![allow(unused_assignments)]\n");
+    dst.push_str("#![allow(unused_variables)]\n");
     dump_module(&mut dst, &module);
     Ok(dst)
 }
