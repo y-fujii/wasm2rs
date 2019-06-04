@@ -214,7 +214,10 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
     while let Some(inst) = inst_it.next() {
         match inst {
             Instruction::Nop => {}
-            Instruction::Unreachable => {}
+            Instruction::Unreachable => {
+                dump_indent(dst, n_indent);
+                dst.push_str("unreachable!();\n");
+            }
             Instruction::Drop => {
                 sid -= 1;
             }
@@ -466,8 +469,7 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::Return => {
-                dump_indent(dst, n_indent);
-                write!(dst, "return s{};\n", sid - 1).unwrap();
+                dump_jump(dst, sid, &labels, labels.len() as u32 - 1, n_indent);
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::If(block_ty) => {
