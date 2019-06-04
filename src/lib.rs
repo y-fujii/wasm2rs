@@ -8,13 +8,14 @@ enum LabelType {
     Block,
     Loop,
     If,
+    Function,
 }
 
 #[derive(Debug, Clone)]
 struct Label {
     lid: usize,
     ty: LabelType,
-    arity: usize,
+    coarity: usize,
     sid: usize,
 }
 
@@ -88,20 +89,27 @@ fn dump_cmp_op_u_lt(dst: &mut String, sid: &mut usize, ty: &str, n_indent: usize
 fn dump_jump(dst: &mut String, sid: usize, labels: &Vec<Label>, n: u32, n_indent: usize) {
     dump_indent(dst, n_indent);
     let label = &labels[labels.len() - 1 - n as usize];
+    // br instructions resize the stack.
     match label.ty {
         LabelType::Block | LabelType::If => {
-            // br instruction allows to resize the stack.
-            //assert!(label.sid + label.arity == sid);
+            //assert!(label.sid + label.coarity == sid);
             write!(dst, "break 'l{}", label.lid).unwrap();
-            if label.arity == 1 {
+            if label.coarity == 1 {
                 write!(dst, " s{}", sid - 1).unwrap();
             }
             dst.push_str(";\n");
         }
         LabelType::Loop => {
-            // br instruction allows to resize the stack.
             //assert!(label.sid == sid);
             write!(dst, "continue 'l{};\n", label.lid).unwrap();
+        }
+        LabelType::Function => {
+            //assert!(label.sid + label.coarity == sid);
+            dst.push_str("return");
+            if label.coarity == 1 {
+                write!(dst, " s{}", sid - 1).unwrap();
+            }
+            dst.push_str(";\n");
         }
     }
 }
@@ -116,7 +124,7 @@ fn dump_label(
     label_ty: LabelType,
 ) {
     dump_indent(dst, *n_indent);
-    let arity = match block_ty {
+    let coarity = match block_ty {
         BlockType::NoResult => 0,
         BlockType::Value(value_ty) => {
             write!(dst, "let s{}: {} = ", sid, type_str(*value_ty)).unwrap();
@@ -127,7 +135,7 @@ fn dump_label(
     labels.push(Label {
         lid: *lid,
         ty: label_ty,
-        arity: arity,
+        coarity: coarity,
         sid: sid,
     });
     *lid += 1;
@@ -163,11 +171,8 @@ fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
                     depth -= 1;
                     continue;
                 }
-                let label = match labels.pop() {
-                    Some(e) => e,
-                    None => return, // XXX
-                };
-                *sid = label.sid + label.arity;
+                let label = labels.pop().unwrap();
+                *sid = label.sid + label.coarity;
                 *n_indent -= 1;
                 dump_indent(dst, *n_indent);
                 match label.ty {
@@ -177,6 +182,9 @@ fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
                     LabelType::If => {
                         dst.push_str("}; };\n");
                     }
+                    LabelType::Function => {
+                        dst.push_str("}\n");
+                    }
                 }
                 break;
             }
@@ -185,15 +193,24 @@ fn skip_to_end<'a, T: Iterator<Item = &'a Instruction>>(
     }
 }
 
-fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &parity_wasm::elements::FuncBody) {
+fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
+    dst: &mut String,
+    mut inst_it: T,
+    coarity: usize,
+    module: &parity_wasm::elements::Module,
+) {
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
 
     let mut n_indent = 1;
     let mut sid = 0;
     let mut lid = 0;
-    let mut labels = Vec::new();
-    let mut inst_it = body.code().elements().iter();
+    let mut labels = vec![Label {
+        lid: !0,
+        ty: LabelType::Function,
+        coarity: coarity,
+        sid: sid,
+    }];
     while let Some(inst) = inst_it.next() {
         match inst {
             Instruction::Nop => {}
@@ -201,8 +218,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::Drop => {
                 sid -= 1;
             }
-            Instruction::GrowMemory(_) => {
-            }
+            Instruction::GrowMemory(_) => {}
             Instruction::Select => {
                 dump_indent(dst, n_indent);
                 write!(
@@ -290,7 +306,14 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::I32Store16(_, offset) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "*(({} + s{}) as *mut i16) = s{} as i16;\n", offset, sid - 2, sid - 1).unwrap();
+                write!(
+                    dst,
+                    "*(({} + s{}) as *mut i16) = s{} as i16;\n",
+                    offset,
+                    sid - 2,
+                    sid - 1
+                )
+                .unwrap();
                 sid -= 2;
             }
             Instruction::TeeLocal(i) => {
@@ -384,9 +407,16 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 let ftyp = match &types[*n as usize] {
                     parity_wasm::elements::Type::Function(t) => t,
                 };
+                // XXX: dummy {
+                if let Some(ty) = ftyp.return_type() {
+                    dump_indent(dst, n_indent);
+                    write!(dst, "let s{}: {} = 0;\n", sid - ftyp.params().len() - 1, type_str(ty)).unwrap();
+                }
+                // XXX: }
                 dump_indent(dst, n_indent);
-                // XXX
+                // XXX: dummy {
                 dst.push_str("// ");
+                // XXX: }
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid - ftyp.params().len() - 1).unwrap();
                 }
@@ -419,7 +449,20 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dump_indent(dst, n_indent);
                 dst.push_str("}\n");
             }
-            Instruction::BrTable(_) => {
+            Instruction::BrTable(data) => {
+                dump_indent(dst, n_indent);
+                write!(dst, "match s{} {{\n", sid - 1).unwrap();
+                sid -= 1;
+                for (i, n) in data.table.iter().enumerate() {
+                    dump_indent(dst, n_indent + 1);
+                    write!(dst, "{} => ", i).unwrap();
+                    dump_jump(dst, sid, &labels, *n, 0);
+                }
+                dump_indent(dst, n_indent + 1);
+                dst.push_str("_ => ");
+                dump_jump(dst, sid, &labels, data.default, 0);
+                dump_indent(dst, n_indent);
+                dst.push_str("}\n");
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::Return => {
@@ -429,7 +472,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             }
             Instruction::If(block_ty) => {
                 dump_indent(dst, n_indent);
-                let arity = match block_ty {
+                let coarity = match block_ty {
                     BlockType::NoResult => 0,
                     BlockType::Value(value_ty) => {
                         write!(dst, "let s{}: {} = ", sid - 1, type_str(*value_ty)).unwrap();
@@ -441,7 +484,7 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 labels.push(Label {
                     lid: lid,
                     ty: LabelType::If,
-                    arity: arity,
+                    coarity: coarity,
                     sid: sid,
                 });
                 lid += 1;
@@ -450,8 +493,8 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
             Instruction::Else => {
                 let label = labels.last().unwrap();
                 assert!(label.ty == LabelType::If);
-                assert!(label.sid + label.arity == sid);
-                if label.arity == 1 {
+                assert!(label.sid + label.coarity == sid);
+                if label.coarity == 1 {
                     dump_indent(dst, n_indent);
                     write!(dst, "s{}\n", sid - 1).unwrap();
                     sid = label.sid;
@@ -460,15 +503,12 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                 dst.push_str("} else {\n");
             }
             Instruction::End => {
-                let label = match labels.pop() {
-                    Some(e) => e,
-                    None => continue, // XXX: check sid.
-                };
-                assert!(label.sid + label.arity == sid);
+                let label = labels.pop().unwrap();
+                assert!(label.sid + label.coarity == sid);
                 match label.ty {
                     LabelType::Block | LabelType::Loop => {
                         dump_indent(dst, n_indent);
-                        if label.arity == 1 {
+                        if label.coarity == 1 {
                             write!(dst, "break s{};\n", sid - 1).unwrap();
                         } else {
                             dst.push_str("break;\n");
@@ -478,13 +518,22 @@ fn dump_body(dst: &mut String, module: &parity_wasm::elements::Module, body: &pa
                         dst.push_str("};\n");
                     }
                     LabelType::If => {
-                        if label.arity == 1 {
+                        if label.coarity == 1 {
                             dump_indent(dst, n_indent);
                             write!(dst, "s{}\n", sid - 1).unwrap();
                         }
                         n_indent -= 1;
                         dump_indent(dst, n_indent);
                         dst.push_str("}; };\n");
+                    }
+                    LabelType::Function => {
+                        if label.coarity == 1 {
+                            dump_indent(dst, n_indent);
+                            write!(dst, "s{}\n", sid - 1).unwrap();
+                        }
+                        n_indent -= 1;
+                        dump_indent(dst, n_indent);
+                        dst.push_str("}\n");
                     }
                 }
             }
@@ -555,12 +604,8 @@ fn dump_module(dst: &mut String, module: &parity_wasm::elements::Module) {
                 local_idx += 1;
             }
         }
-        dump_body(dst, &module, body);
-        if let Some(_) = ftyp.return_type() {
-            dump_indent(dst, 1);
-            dst.push_str("s0\n");
-        }
-        dst.push_str("}\n");
+        let coarity = if let Some(_) = ftyp.return_type() { 1 } else { 0 };
+        dump_code(dst, body.code().elements().iter(), coarity, &module);
     }
 }
 

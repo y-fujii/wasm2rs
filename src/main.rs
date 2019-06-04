@@ -8,6 +8,6 @@ fn main() -> result::Result<(), Box<error::Error>> {
     fs::write("test/loop.rs", wasm2rs::wasm_to_rust("test/loop.wasm")?)?;
     fs::write("test/if.rs", wasm2rs::wasm_to_rust("test/if.wasm")?)?;
     fs::write("test/br.rs", wasm2rs::wasm_to_rust("test/br.wasm")?)?;
-    fs::write("test/br_if.rs", wasm2rs::wasm_to_rust("test/br_if_mod.wasm")?)?;
+    fs::write("test/br_if.rs", wasm2rs::wasm_to_rust("test/br_if.wasm")?)?;
     Ok(())
 }
