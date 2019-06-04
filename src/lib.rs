@@ -385,6 +385,10 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 dump_indent(dst, n_indent);
                 write!(dst, "let s{} = (s{} == 0i64) as i32;\n", sid - 1, sid - 1).unwrap();
             }
+            Instruction::F32Sqrt | Instruction::F64Sqrt => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{}.sqrt();\n", sid - 1, sid - 1).unwrap();
+            }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
                     parity_wasm::elements::Type::Function(t) => t,
