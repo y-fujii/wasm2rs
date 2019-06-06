@@ -35,9 +35,46 @@ fn dump_indent(dst: &mut String, n: usize) {
     }
 }
 
+fn dump_load(dst: &mut String, sid: usize, offset: u32, ty0: &str, ty1: &str, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(
+        dst,
+        "let s{} = *(({} + s{}) as *const {}) as {};\n",
+        sid - 1,
+        offset,
+        sid - 1,
+        ty0,
+        ty1,
+    )
+    .unwrap();
+}
+
+fn dump_store(dst: &mut String, sid: &mut usize, offset: u32, ty: &str, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(dst, "*(({} + s{}) as *mut {}) = s{} as {};\n", offset, *sid - 2, ty, *sid - 1, ty).unwrap();
+    *sid -= 2;
+}
+
 fn dump_bin_op(dst: &mut String, sid: &mut usize, op: &str, n_indent: usize) {
     dump_indent(dst, n_indent);
-    write!(dst, "let s{} = s{} {} s{};\n", *sid - 2, *sid - 2, op, *sid - 1).unwrap();
+    write!(dst, "let s{} = s{} {} s{};\n", *sid - 2, *sid - 1, op, *sid - 2).unwrap();
+    *sid -= 1;
+}
+
+fn dump_bin_op_u(dst: &mut String, sid: &mut usize, op: &str, ty: &str, n_indent: usize) {
+    dump_indent(dst, n_indent);
+    write!(
+        dst,
+        "let s{} = (s{} as u{} {} s{} as u{}) as i{};\n",
+        *sid - 2,
+        *sid - 1,
+        ty,
+        op,
+        *sid - 2,
+        ty,
+        ty
+    )
+    .unwrap();
     *sid -= 1;
 }
 
@@ -47,9 +84,9 @@ fn dump_cmp_op(dst: &mut String, sid: &mut usize, op: &str, n_indent: usize) {
         dst,
         "let s{} = (s{} {} s{}) as i32;\n",
         *sid - 2,
-        *sid - 2,
-        op,
         *sid - 1,
+        op,
+        *sid - 2,
     )
     .unwrap();
     *sid -= 1;
@@ -61,10 +98,10 @@ fn dump_cmp_op_u(dst: &mut String, sid: &mut usize, op: &str, ty: &str, n_indent
         dst,
         "let s{} = (s{} as {} {} s{} as {}) as i32;\n",
         *sid - 2,
-        *sid - 2,
+        *sid - 1,
         ty,
         op,
-        *sid - 1,
+        *sid - 2,
         ty,
     )
     .unwrap();
@@ -77,9 +114,9 @@ fn dump_cmp_op_u_lt(dst: &mut String, sid: &mut usize, ty: &str, n_indent: usize
         dst,
         "let s{} = ((s{} as {}) < s{} as {}) as i32;\n",
         *sid - 2,
-        *sid - 2,
-        ty,
         *sid - 1,
+        ty,
+        *sid - 2,
         ty,
     )
     .unwrap();
@@ -214,6 +251,7 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             Instruction::Unreachable => {
                 dump_indent(dst, n_indent);
                 dst.push_str("unreachable!();\n");
+                skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::Drop => {
                 sid -= 1;
@@ -225,9 +263,9 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                     dst,
                     "let s{} = if s{} != 0i32 {{ s{} }} else {{ s{} }};\n",
                     sid - 3,
-                    sid - 3,
+                    sid - 1,
                     sid - 2,
-                    sid - 1
+                    sid - 3,
                 )
                 .unwrap();
                 sid -= 2;
@@ -272,6 +310,15 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 write!(dst, "G{} = s{};\n", i, sid - 1).unwrap();
                 sid -= 1;
             }
+            Instruction::I32Load8S(_, offset) => {
+                dump_load(dst, sid, *offset, "i8", "i32", n_indent);
+            }
+            Instruction::I32Load8U(_, offset) => {
+                dump_load(dst, sid, *offset, "u8", "i32", n_indent);
+            }
+            Instruction::I32Load16U(_, offset) => {
+                dump_load(dst, sid, *offset, "u16", "i32", n_indent);
+            }
             Instruction::I32Load(_, offset) => {
                 dump_indent(dst, n_indent);
                 write!(
@@ -283,37 +330,40 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 )
                 .unwrap();
             }
-            Instruction::I32Load8S(_, offset) => {
+            Instruction::I64Load8U(_, offset) => {
+                dump_load(dst, sid, *offset, "u8", "i64", n_indent);
+            }
+            Instruction::I64Load32S(_, offset) => {
+                dump_load(dst, sid, *offset, "i32", "i64", n_indent);
+            }
+            Instruction::I64Load32U(_, offset) => {
+                dump_load(dst, sid, *offset, "u32", "i64", n_indent);
+            }
+            Instruction::I64Load(_, offset) => {
                 dump_indent(dst, n_indent);
                 write!(
                     dst,
-                    "let s{} = *(({} + s{}) as *const i8) as i32;\n",
+                    "let s{} = *(({} + s{}) as *const i64);\n",
                     sid - 1,
                     offset,
                     sid - 1
                 )
                 .unwrap();
             }
+            Instruction::I32Store8(_, offset) => {
+                dump_store(dst, &mut sid, *offset, "i8", n_indent);
+            }
+            Instruction::I32Store16(_, offset) => {
+                dump_store(dst, &mut sid, *offset, "i16", n_indent);
+            }
             Instruction::I32Store(_, offset) => {
                 dump_indent(dst, n_indent);
                 write!(dst, "*(({} + s{}) as *mut i32) = s{};\n", offset, sid - 2, sid - 1).unwrap();
                 sid -= 2;
             }
-            Instruction::I32Store8(_, offset) => {
+            Instruction::I64Store(_, offset) => {
                 dump_indent(dst, n_indent);
-                write!(dst, "*(({} + s{}) as *mut i8) = s{} as i8;\n", offset, sid - 2, sid - 1).unwrap();
-                sid -= 2;
-            }
-            Instruction::I32Store16(_, offset) => {
-                dump_indent(dst, n_indent);
-                write!(
-                    dst,
-                    "*(({} + s{}) as *mut i16) = s{} as i16;\n",
-                    offset,
-                    sid - 2,
-                    sid - 1
-                )
-                .unwrap();
+                write!(dst, "*(({} + s{}) as *mut i64) = s{};\n", offset, sid - 2, sid - 1).unwrap();
                 sid -= 2;
             }
             Instruction::TeeLocal(i) => {
@@ -335,6 +385,9 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             Instruction::I32GtS | Instruction::I64GtS | Instruction::F32Gt | Instruction::F64Gt => {
                 dump_cmp_op(dst, &mut sid, ">", n_indent);
             }
+            Instruction::I32GeS | Instruction::I64GeS | Instruction::F32Ge | Instruction::F64Ge => {
+                dump_cmp_op(dst, &mut sid, ">=", n_indent);
+            }
             Instruction::I32LtU => {
                 dump_cmp_op_u_lt(dst, &mut sid, "u32", n_indent);
             }
@@ -353,6 +406,9 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             Instruction::I64LeU => {
                 dump_cmp_op_u(dst, &mut sid, "<=", "u64", n_indent);
             }
+            Instruction::I32GeU => {
+                dump_cmp_op_u(dst, &mut sid, ">=", "u32", n_indent);
+            }
             Instruction::F32Neg | Instruction::F64Neg => {
                 dump_indent(dst, n_indent);
                 write!(dst, "let s{} = -s{};\n", sid - 1, sid - 1).unwrap();
@@ -369,9 +425,70 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             Instruction::I32DivS | Instruction::I64DivS | Instruction::F32Div | Instruction::F64Div => {
                 dump_bin_op(dst, &mut sid, "/", n_indent);
             }
+            Instruction::I32And | Instruction::I64And => {
+                dump_bin_op(dst, &mut sid, "&", n_indent);
+            }
+            Instruction::I32Or | Instruction::I64Or => {
+                dump_bin_op(dst, &mut sid, "|", n_indent);
+            }
+            Instruction::I32Xor | Instruction::I64Xor => {
+                dump_bin_op(dst, &mut sid, "^", n_indent);
+            }
+            Instruction::I32Shl | Instruction::I64Shl => {
+                dump_bin_op(dst, &mut sid, "<<", n_indent);
+            }
+            Instruction::I32ShrS | Instruction::I64ShrS => {
+                dump_bin_op(dst, &mut sid, ">>", n_indent);
+            }
+            Instruction::I32Rotl | Instruction::I64Rotl => {
+                dump_indent(dst, n_indent);
+                write!(
+                    dst,
+                    "let s{} = s{}.rotate_left({} as u32);\n",
+                    sid - 2,
+                    sid - 1,
+                    sid - 2
+                )
+                .unwrap();
+                sid -= 1;
+            }
+            Instruction::I32DivU => {
+                dump_bin_op_u(dst, &mut sid, "/", "32", n_indent);
+            }
+            Instruction::I64DivU => {
+                dump_bin_op_u(dst, &mut sid, "/", "64", n_indent);
+            }
+            Instruction::I32RemU => {
+                dump_bin_op_u(dst, &mut sid, "%", "32", n_indent);
+            }
+            Instruction::I64RemU => {
+                dump_bin_op_u(dst, &mut sid, "%", "64", n_indent);
+            }
+            Instruction::I32ShrU => {
+                dump_bin_op_u(dst, &mut sid, ">>", "32", n_indent);
+            }
+            Instruction::I64ShrU => {
+                dump_bin_op_u(dst, &mut sid, ">>", "64", n_indent);
+            }
+            Instruction::I32WrapI64 => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{} as i32;\n", sid - 1, sid - 1).unwrap();
+            }
+            Instruction::I64ExtendUI32 => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{} as u32 as i64;\n", sid - 1, sid - 1).unwrap();
+            }
+            Instruction::I64ExtendSI32 => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{} as i64;\n", sid - 1, sid - 1).unwrap();
+            }
             Instruction::I32Ctz => {
                 dump_indent(dst, n_indent);
                 write!(dst, "let s{} = s{}.trailing_zeros() as i32;\n", sid - 1, sid - 1).unwrap();
+            }
+            Instruction::I32Clz => {
+                dump_indent(dst, n_indent);
+                write!(dst, "let s{} = s{}.leading_zeros() as i32;\n", sid - 1, sid - 1).unwrap();
             }
             Instruction::I64Ctz => {
                 dump_indent(dst, n_indent);
@@ -398,10 +515,10 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                     write!(dst, "let s{} = ", sid - ftyp.params().len()).unwrap();
                 }
                 write!(dst, "f{}(", n).unwrap();
-                for _ in ftyp.params() {
-                    write!(dst, "s{},", sid - 1).unwrap();
-                    sid -= 1;
+                for i in sid - ftyp.params().len() .. sid {
+                    write!(dst, "s{},", i).unwrap();
                 }
+                sid -= ftyp.params().len();
                 dst.push_str(");\n");
                 if let Some(_) = ftyp.return_type() {
                     sid += 1;
@@ -426,10 +543,10 @@ fn dump_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 }
                 write!(dst, "func_table[s{} as usize](", sid - 1).unwrap();
                 sid -= 1;
-                for _ in ftyp.params() {
-                    write!(dst, "s{},", sid - 1).unwrap();
-                    sid -= 1;
+                for i in sid - ftyp.params().len() .. sid {
+                    write!(dst, "s{},", i).unwrap();
                 }
+                sid -= ftyp.params().len();
                 dst.push_str(");\n");
                 if let Some(_) = ftyp.return_type() {
                     sid += 1;
