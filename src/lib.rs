@@ -40,6 +40,12 @@ fn type_str(v: parity_wasm::elements::ValueType) -> &'static str {
     }
 }
 
+fn resize_stack(sid: &mut usize, labels: &Vec<Label>, arity: usize, coarity: usize) {
+    assert!(*sid >= labels.last().unwrap().sid + arity);
+    *sid -= arity;
+    *sid += coarity;
+}
+
 fn write_indent(dst: &mut String, n: usize) {
     for _ in 0..n {
         dst.push_str("  ");
@@ -172,286 +178,313 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
         match inst {
             Instruction::Nop => {}
             Instruction::Drop => {
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 1, 0);
             }
-            Instruction::GrowMemory(_) => {}
+            Instruction::GrowMemory(_) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+            }
             Instruction::Select => {
+                resize_stack(&mut sid, &labels, 3, 1);
                 write_line!(
                     dst,
                     n_indent,
                     "let s{2} = if s{} != 0i32 {{ s{} }} else {{ s{} }}",
-                    sid - 1,
-                    sid - 2,
-                    sid - 3
+                    sid + 1,
+                    sid,
+                    sid - 1
                 );
-                sid -= 2;
             }
             Instruction::I32Const(n) => {
-                write_line!(dst, n_indent, "let s{} = {}i32", sid, n);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = {}i32", sid - 1, n);
             }
             Instruction::I64Const(n) => {
-                write_line!(dst, n_indent, "let s{} = {}i64", sid, n);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = {}i64", sid - 1, n);
             }
             Instruction::F32Const(n) => {
-                write_line!(dst, n_indent, "let s{} = f32::from_bits({})", sid, n);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = f32::from_bits({})", sid - 1, n);
             }
             Instruction::F64Const(n) => {
-                write_line!(dst, n_indent, "let s{} = f64::from_bits({})", sid, n);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = f64::from_bits({})", sid - 1, n);
             }
             Instruction::GetLocal(i) => {
-                write_line!(dst, n_indent, "let s{} = v{}", sid, i);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = v{}", sid - 1, i);
             }
             Instruction::SetLocal(i) => {
-                write_line!(dst, n_indent, "v{} = s{}", i, sid - 1);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 1, 0);
+                write_line!(dst, n_indent, "v{} = s{}", i, sid);
             }
             Instruction::GetGlobal(i) => {
-                write_line!(dst, n_indent, "let s{} = G{}", sid, i);
-                sid += 1;
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{} = G{}", sid - 1, i);
             }
             Instruction::SetGlobal(i) => {
-                write_line!(dst, n_indent, "G{} = s{}", i, sid - 1);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 1, 0);
+                write_line!(dst, n_indent, "G{} = s{}", i, sid);
             }
-            Instruction::I32Load8S(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i8) as i32", offset, sid - 1);
+            Instruction::I32Load8S(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i8) as i32", ofs, sid - 1);
             }
-            Instruction::I32Load8U(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u8) as i32", offset, sid - 1);
+            Instruction::I32Load8U(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u8) as i32", ofs, sid - 1);
             }
-            Instruction::I32Load16S(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const s16) as i32", offset, sid - 1);
+            Instruction::I32Load16S(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const s16) as i32", ofs, sid - 1);
             }
-            Instruction::I32Load16U(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u16) as i32", offset, sid - 1);
+            Instruction::I32Load16U(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u16) as i32", ofs, sid - 1);
             }
-            Instruction::I32Load(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i32)", offset, sid - 1);
+            Instruction::I32Load(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i32)", ofs, sid - 1);
             }
-            Instruction::I64Load8S(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i8) as i64", offset, sid - 1);
+            Instruction::I64Load8S(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i8) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load8U(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u8) as i64", offset, sid - 1);
+            Instruction::I64Load8U(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u8) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load16S(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const s16) as i64", offset, sid - 1);
+            Instruction::I64Load16S(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const s16) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load16U(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u16) as i64", offset, sid - 1);
+            Instruction::I64Load16U(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u16) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load32S(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i32) as i64", offset, sid - 1);
+            Instruction::I64Load32S(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i32) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load32U(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u32) as i64", offset, sid - 1);
+            Instruction::I64Load32U(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const u32) as i64", ofs, sid - 1);
             }
-            Instruction::I64Load(_, offset) => {
-                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i64)", offset, sid - 1);
+            Instruction::I64Load(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = *(({} + s{}) as *const i64)", ofs, sid - 1);
             }
-            Instruction::I32Store8(_, offset) => {
-                write_line!(dst, n_indent, "*(({} + s{}) as *mut i8) = s{} as i8", offset, sid - 2, sid - 1);
-                sid -= 2;
+            Instruction::I32Store8(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "*(({} + s{}) as *mut i8) = s{} as i8", ofs, sid, sid + 1);
             }
-            Instruction::I32Store16(_, offset) => {
-                write_line!(dst, n_indent, "*(({} + s{}) as *mut i16) = s{} as i16", offset, sid - 2, sid - 1);
-                sid -= 2;
+            Instruction::I32Store16(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "*(({} + s{}) as *mut i16) = s{} as i16", ofs, sid, sid + 1);
             }
-            Instruction::I32Store(_, offset) => {
-                write_line!(dst, n_indent, "*(({} + s{}) as *mut i32) = s{}", offset, sid - 2, sid - 1);
-                sid -= 2;
+            Instruction::I32Store(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "*(({} + s{}) as *mut i32) = s{}", ofs, sid, sid + 1);
             }
-            Instruction::I64Store(_, offset) => {
-                write_line!(dst, n_indent, "*(({} + s{}) as *mut i64) = s{}", offset, sid - 2, sid - 1);
-                sid -= 2;
+            Instruction::I64Store(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "*(({} + s{}) as *mut i64) = s{}", ofs, sid, sid + 1);
             }
             Instruction::TeeLocal(i) => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "v{} = s{}", i, sid - 1);
             }
             Instruction::I32Eq | Instruction::I64Eq | Instruction::F32Eq | Instruction::F64Eq => {
-                write_line!(dst, n_indent, "let s{1} = (s{} == s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} == s{}) as i32", sid, sid - 1);
             }
             Instruction::I32Ne | Instruction::I64Ne | Instruction::F32Ne | Instruction::F64Ne => {
-                write_line!(dst, n_indent, "let s{1} = (s{} != s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} != s{}) as i32", sid, sid - 1);
             }
             Instruction::I32LtS | Instruction::I64LtS | Instruction::F32Lt | Instruction::F64Lt => {
-                write_line!(dst, n_indent, "let s{1} = (s{} < s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} < s{}) as i32", sid, sid - 1);
             }
             Instruction::I32LeS | Instruction::I64LeS | Instruction::F32Le | Instruction::F64Le => {
-                write_line!(dst, n_indent, "let s{1} = (s{} <= s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} <= s{}) as i32", sid, sid - 1);
             }
             Instruction::I32GtS | Instruction::I64GtS | Instruction::F32Gt | Instruction::F64Gt => {
-                write_line!(dst, n_indent, "let s{1} = (s{} > s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} > s{}) as i32", sid, sid - 1);
             }
             Instruction::I32GeS | Instruction::I64GeS | Instruction::F32Ge | Instruction::F64Ge => {
-                write_line!(dst, n_indent, "let s{1} = (s{} >= s{}) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} >= s{}) as i32", sid, sid - 1);
             }
             Instruction::I32LtU => {
-                write_line!(dst, n_indent, "let s{1} = ((s{} as u32) < s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = ((s{} as u32) < s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64LtU => {
-                write_line!(dst, n_indent, "let s{1} = ((s{} as u64) < s{} as u64) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = ((s{} as u64) < s{} as u64) as i32", sid, sid - 1);
             }
             Instruction::I32LeU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 <= s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 <= s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64LeU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 <= s{} as u64) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 <= s{} as u64) as i32", sid, sid - 1);
             }
             Instruction::I32GtU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 > s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 > s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64GtU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 > s{} as u64) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 > s{} as u64) as i32", sid, sid - 1);
             }
             Instruction::I32GeU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 >= s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 >= s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64GeU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 >= s{} as u64) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 >= s{} as u64) as i32", sid, sid - 1);
             }
             Instruction::F32Neg | Instruction::F64Neg => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = -s{}", sid - 1);
             }
             Instruction::I32Add | Instruction::I64Add | Instruction::F32Add | Instruction::F64Add => {
-                write_line!(dst, n_indent, "let s{1} = s{} + s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} + s{}", sid, sid - 1);
             }
             Instruction::I32Sub | Instruction::I64Sub | Instruction::F32Sub | Instruction::F64Sub => {
-                write_line!(dst, n_indent, "let s{1} = s{} - s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} - s{}", sid, sid - 1);
             }
             Instruction::I32Mul | Instruction::I64Mul | Instruction::F32Mul | Instruction::F64Mul => {
-                write_line!(dst, n_indent, "let s{1} = s{} * s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} * s{}", sid, sid - 1);
             }
             Instruction::I32DivS | Instruction::I64DivS | Instruction::F32Div | Instruction::F64Div => {
-                write_line!(dst, n_indent, "let s{1} = s{} / s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} / s{}", sid, sid - 1);
             }
             Instruction::I32And | Instruction::I64And => {
-                write_line!(dst, n_indent, "let s{1} = s{} & s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} & s{}", sid, sid - 1);
             }
             Instruction::I32Or | Instruction::I64Or => {
-                write_line!(dst, n_indent, "let s{1} = s{} | s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} | s{}", sid, sid - 1);
             }
             Instruction::I32Xor | Instruction::I64Xor => {
-                write_line!(dst, n_indent, "let s{1} = s{} ^ s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} ^ s{}", sid, sid - 1);
             }
             Instruction::I32Shl | Instruction::I64Shl => {
-                write_line!(dst, n_indent, "let s{1} = s{} << s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} << s{}", sid, sid - 1);
             }
             Instruction::I32ShrS | Instruction::I64ShrS => {
-                write_line!(dst, n_indent, "let s{1} = s{} >> s{}", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{} >> s{}", sid, sid - 1);
             }
             Instruction::I32Rotl | Instruction::I64Rotl => {
-                write_line!(dst, n_indent, "let s{1} = s{}.rotate_left({} as u32)", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = s{}.rotate_left({} as u32)", sid, sid - 1);
             }
             Instruction::I32DivU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 / s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 / s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64DivU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 / s{} as u64) as i64", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 / s{} as u64) as i64", sid, sid - 1);
             }
             Instruction::I32RemU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 % s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 % s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64RemU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 % s{} as u64) as i64", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 % s{} as u64) as i64", sid, sid - 1);
             }
             Instruction::I32ShrU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u32 >> s{} as u32) as i32", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u32 >> s{} as u32) as i32", sid, sid - 1);
             }
             Instruction::I64ShrU => {
-                write_line!(dst, n_indent, "let s{1} = (s{} as u64 >> s{} as u64) as i64", sid - 1, sid - 2);
-                sid -= 1;
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{1} = (s{} as u64 >> s{} as u64) as i64", sid, sid - 1);
             }
             Instruction::I32WrapI64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} as i32", sid - 1);
             }
             Instruction::I64ExtendSI32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} as i64", sid - 1);
             }
             Instruction::I64ExtendUI32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} as u32 as i64", sid - 1);
             }
             Instruction::I32Ctz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.trailing_zeros() as i32", sid - 1);
             }
             Instruction::I64Ctz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.trailing_zeros() as i64", sid - 1);
             }
             Instruction::I32Clz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.leading_zeros() as i32", sid - 1);
             }
             Instruction::I64Clz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.leading_zeros() as i64", sid - 1);
             }
             Instruction::I32Eqz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = (s{} == 0i32) as i32", sid - 1);
             }
             Instruction::I64Eqz => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = (s{} == 0i64) as i32", sid - 1);
             }
             Instruction::F32Sqrt | Instruction::F64Sqrt => {
+                resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.sqrt()", sid - 1);
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
                     parity_wasm::elements::Type::Function(t) => t,
                 };
+                resize_stack(&mut sid, &labels, ftyp.params().len(), 0);
                 write_indent(dst, n_indent);
                 if let Some(_) = ftyp.return_type() {
-                    write!(dst, "let s{} = ", sid - ftyp.params().len()).unwrap();
+                    write!(dst, "let s{} = ", sid).unwrap();
                 }
                 write!(dst, "f{}(", n).unwrap();
-                for i in sid - ftyp.params().len()..sid {
+                for i in sid..sid + ftyp.params().len() {
                     write!(dst, "s{},", i).unwrap();
                 }
-                sid -= ftyp.params().len();
                 dst.push_str(");\n");
                 if let Some(_) = ftyp.return_type() {
-                    sid += 1;
+                    resize_stack(&mut sid, &labels, 0, 1);
                 }
             }
             Instruction::CallIndirect(n, _) => {
                 let ftyp = match &types[*n as usize] {
                     parity_wasm::elements::Type::Function(t) => t,
                 };
+                resize_stack(&mut sid, &labels, ftyp.params().len() + 1, 0);
                 // XXX: dummy {
                 if let Some(ty) = ftyp.return_type() {
                     write_indent(dst, n_indent);
-                    write!(dst, "let s{}: {} = 0;\n", sid - ftyp.params().len() - 1, type_str(ty)).unwrap();
+                    write!(dst, "let s{}: {} = 0;\n", sid, type_str(ty)).unwrap();
                 }
                 // XXX: }
                 write_indent(dst, n_indent);
@@ -459,17 +492,15 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 dst.push_str("// ");
                 // XXX: }
                 if let Some(_) = ftyp.return_type() {
-                    write!(dst, "let s{} = ", sid - ftyp.params().len() - 1).unwrap();
+                    write!(dst, "let s{} = ", sid).unwrap();
                 }
-                write!(dst, "func_table[s{} as usize](", sid - 1).unwrap();
-                sid -= 1;
-                for i in sid - ftyp.params().len()..sid {
+                write!(dst, "func_table[s{} as usize](", sid + ftyp.params().len()).unwrap();
+                for i in sid..sid + ftyp.params().len() {
                     write!(dst, "s{},", i).unwrap();
                 }
-                sid -= ftyp.params().len();
                 dst.push_str(");\n");
                 if let Some(_) = ftyp.return_type() {
-                    sid += 1;
+                    resize_stack(&mut sid, &labels, 0, 1);
                 }
             }
             Instruction::Unreachable => {
@@ -489,9 +520,9 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::BrIf(n) => {
+                resize_stack(&mut sid, &labels, 1, 0);
                 write_indent(dst, n_indent);
-                write!(dst, "if s{} != 0i32 {{\n", sid - 1).unwrap();
-                sid -= 1;
+                write!(dst, "if s{} != 0i32 {{\n", sid).unwrap();
                 write_indent(dst, n_indent + 1);
                 write_jump(dst, sid, &labels, *n);
                 dst.push_str(";\n");
@@ -499,9 +530,9 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 dst.push_str("}\n");
             }
             Instruction::BrTable(data) => {
+                resize_stack(&mut sid, &labels, 1, 0);
                 write_indent(dst, n_indent);
-                write!(dst, "match s{} {{\n", sid - 1).unwrap();
-                sid -= 1;
+                write!(dst, "match s{} {{\n", sid).unwrap();
                 for (i, n) in data.table.iter().enumerate() {
                     write_indent(dst, n_indent + 1);
                     write!(dst, "{} => ", i).unwrap();
@@ -523,16 +554,16 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 skip_to_end(dst, &mut sid, &mut labels, &mut n_indent, &mut inst_it);
             }
             Instruction::If(block_ty) => {
+                resize_stack(&mut sid, &labels, 1, 0);
                 write_indent(dst, n_indent);
                 let coarity = match block_ty {
                     BlockType::NoResult => 0,
                     BlockType::Value(value_ty) => {
-                        write!(dst, "let s{}: {} = ", sid - 1, type_str(*value_ty)).unwrap();
+                        write!(dst, "let s{}: {} = ", sid, type_str(*value_ty)).unwrap();
                         1
                     }
                 };
-                write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lid, sid - 1).unwrap();
-                sid -= 1;
+                write!(dst, "'l{}: loop {{ break if s{} != 0i32 {{\n", lid, sid).unwrap();
                 labels.push(Label {
                     lid: lid,
                     ty: LabelType::If,
