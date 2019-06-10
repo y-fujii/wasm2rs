@@ -226,11 +226,11 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             }
             Instruction::GetGlobal(i) => {
                 resize_stack(&mut sid, &labels, 0, 1);
-                write_line!(dst, n_indent, "let s{} = G{}", sid - 1, i);
+                write_line!(dst, n_indent, "let s{} = G{}.with(|e| e.get())", sid - 1, i);
             }
             Instruction::SetGlobal(i) => {
                 resize_stack(&mut sid, &labels, 1, 0);
-                write_line!(dst, n_indent, "G{} = s{}", i, sid);
+                write_line!(dst, n_indent, "G{}.with(|e| e.set(s{}))", i, sid);
             }
             Instruction::I32Load8S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
@@ -490,20 +490,20 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                     parity_wasm::elements::Type::Function(t) => t,
                 };
                 resize_stack(&mut sid, &labels, ftyp.params().len() + 1, 0);
-                // XXX: dummy {
-                if let Some(ty) = ftyp.return_type() {
-                    write_indent(dst, n_indent);
-                    write!(dst, "let s{}: {} = 0;\n", sid, type_str(ty)).unwrap();
-                }
-                // XXX: }
                 write_indent(dst, n_indent);
-                // XXX: dummy {
-                dst.push_str("// ");
-                // XXX: }
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid).unwrap();
                 }
-                write!(dst, "func_table[s{} as usize](", sid + ftyp.params().len()).unwrap();
+                dst.push_str("core::mem::transmute::<usize, fn(");
+                for param in ftyp.params() {
+                    write!(dst, "{},", type_str(*param)).unwrap();
+                }
+                dst.push_str(")");
+                if let Some(rtype) = ftyp.return_type() {
+                    dst.push_str(" -> ");
+                    dst.push_str(type_str(rtype));
+                }
+                write!(dst, ">(TABLE.with(|t| t[s{} as usize]))(", sid + ftyp.params().len()).unwrap();
                 for i in sid..sid + ftyp.params().len() {
                     write!(dst, "s{},", i).unwrap();
                 }
@@ -674,22 +674,56 @@ fn read_symbol_map(module: &parity_wasm::elements::Module) -> SymbolMap {
     symbols
 }
 
-fn write_globals(dst: &mut String, module: &parity_wasm::elements::Module, _: &SymbolMap) {
-    if let Some(globals) = module.global_section() {
-        for (i, global) in globals.entries().iter().enumerate() {
-            write!(dst, "static").unwrap();
-            if global.global_type().is_mutable() {
-                write!(dst, " mut").unwrap();
-            }
-            let ty = global.global_type().content_type();
-            write!(dst, " G{}: {}", i, type_str(ty)).unwrap();
-            match global.init_expr().code() {
-                [Instruction::I32Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
-                [Instruction::I64Const(n), Instruction::End] => write!(dst, " = {};\n", n).unwrap(),
-                [Instruction::F32Const(n), Instruction::End] => write!(dst, " = f32::from_bits({});\n", n).unwrap(),
-                [Instruction::F64Const(n), Instruction::End] => write!(dst, " = f64::from_bits({});\n", n).unwrap(),
+fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
+    let size = match module.table_section() {
+        Some(tables) => match tables.entries() {
+            [table] => table.limits().initial() as usize,
+            _ => return,
+        },
+        None => return,
+    };
+    let mut content = vec![0; size];
+
+    if let Some(elems) = module.elements_section() {
+        for elem in elems.entries() {
+            assert!(elem.index() == 0);
+            let offset = match elem.offset().as_ref().unwrap().code() {
+                [Instruction::I32Const(n), Instruction::End] => *n as usize,
+                [Instruction::I64Const(n), Instruction::End] => *n as usize,
                 _ => panic!(),
-            }
+            };
+            content[offset..].copy_from_slice(elem.members());
+        }
+    }
+
+    write_indent(dst, n_indent);
+    write!(dst, "static TABLE: [usize; {}] = [\n", size).unwrap();
+    for i in content.iter() {
+        write_indent(dst, n_indent + 1);
+        match symbols.functions.get(i) {
+            Some(v) => write!(dst, "{} as usize,\n", v).unwrap(),
+            None => write!(dst, "f{} as usize,\n", i).unwrap(),
+        }
+    }
+    write_indent(dst, n_indent);
+    write!(dst, "];\n").unwrap();
+}
+
+fn write_globals(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, _: &SymbolMap) {
+    let globals = match module.global_section() {
+        Some(e) => e,
+        None => return,
+    };
+    for (i, global) in globals.entries().iter().enumerate() {
+        write_indent(dst, n_indent);
+        let ty = global.global_type().content_type();
+        write!(dst, "static G{}: core::cell::Cell<{}> = core::cell::Cell::new(", i, type_str(ty)).unwrap();
+        match global.init_expr().code() {
+            [Instruction::I32Const(n), Instruction::End] => write!(dst, "{});\n", n).unwrap(),
+            [Instruction::I64Const(n), Instruction::End] => write!(dst, "{});\n", n).unwrap(),
+            [Instruction::F32Const(n), Instruction::End] => write!(dst, "f32::from_bits({}));\n", n).unwrap(),
+            [Instruction::F64Const(n), Instruction::End] => write!(dst, "f64::from_bits({}));\n", n).unwrap(),
+            _ => panic!(),
         }
     }
 }
@@ -751,12 +785,14 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
     dst.push_str("#![allow(unreachable_code)]\n");
     dst.push_str("#![allow(unused_assignments)]\n");
     dst.push_str("#![allow(unused_variables)]\n");
-    dst.push_str("#![allow(dead_code)]\n");
     dst.push_str("#![allow(non_snake_case)]\n");
     dst.push_str("\n");
 
     let symbols = read_symbol_map(&module);
-    write_globals(&mut dst, &module, &symbols);
+    dst.push_str("thread_local! {\n");
+    write_table(&mut dst, 1, &module, &symbols);
+    write_globals(&mut dst, 1, &module, &symbols);
+    dst.push_str("}\n");
     write_functions(&mut dst, &module, &symbols);
 
     Ok(dst)
