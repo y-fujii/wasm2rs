@@ -684,6 +684,47 @@ fn read_symbol_map(module: &parity_wasm::elements::Module) -> SymbolMap {
     symbols
 }
 
+fn write_memory(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module) {
+    let size = match module.memory_section() {
+        Some(memories) => match memories.entries() {
+            [memory] => 65536 * memory.limits().initial() as usize,
+            _ => return,
+        },
+        None => return,
+    };
+    write_indent(dst, n_indent);
+    dst.push_str("static MEMORY: Vec<u8> = {\n");
+    write_indent(dst, n_indent + 1);
+    write!(dst, "let mut m = vec![0; {}];\n", size).unwrap();
+
+    if let Some(data) = module.data_section() {
+        for datum in data.entries() {
+            assert!(datum.index() == 0);
+            let offset = match datum.offset().as_ref().unwrap().code() {
+                [Instruction::I32Const(n), Instruction::End] => *n as usize,
+                [Instruction::I64Const(n), Instruction::End] => *n as usize,
+                _ => panic!(),
+            };
+            write_indent(dst, n_indent + 1);
+            write!(dst, "m[{}..{}].copy_from_slice(&[\n", offset, offset + datum.value().len()).unwrap();
+            for chunk in datum.value().chunks(32) {
+                write_indent(dst, n_indent + 2);
+                for v in chunk {
+                    write!(dst, "{},", v).unwrap();
+                }
+                dst.push_str("\n");
+            }
+            write_indent(dst, n_indent + 1);
+            dst.push_str("]);\n");
+        }
+    }
+
+    write_indent(dst, n_indent + 1);
+    dst.push_str("m\n");
+    write_indent(dst, n_indent);
+    dst.push_str("};\n");
+}
+
 fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
     let funcs = module.function_section().unwrap().entries();
     let size = match module.table_section() {
@@ -703,7 +744,7 @@ fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements
                 [Instruction::I64Const(n), Instruction::End] => *n as usize,
                 _ => panic!(),
             };
-            content[offset..].copy_from_slice(elem.members());
+            content[offset..offset + elem.members().len()].copy_from_slice(elem.members());
         }
     }
 
@@ -796,8 +837,9 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
 
     let symbols = read_symbol_map(&module);
     dst.push_str("thread_local! {\n");
-    write_table(&mut dst, 1, &module, &symbols);
     write_globals(&mut dst, 1, &module, &symbols);
+    write_table(&mut dst, 1, &module, &symbols);
+    write_memory(&mut dst, 1, &module);
     dst.push_str("}\n");
     write_functions(&mut dst, &module, &symbols);
 
