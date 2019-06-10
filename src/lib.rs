@@ -494,7 +494,13 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid).unwrap();
                 }
-                dst.push_str("core::mem::transmute::<usize, fn(");
+                dst.push_str("{\n");
+                write_indent(dst, n_indent + 1);
+                write!(dst, "let (t, f) = TABLE.with(|t| t[s{} as usize]);\n", sid + ftyp.params().len()).unwrap();
+                write_indent(dst, n_indent + 1);
+                write!(dst, "assert!(t == {});\n", n).unwrap();
+                write_indent(dst, n_indent + 1);
+                dst.push_str("let f = /*unsafe*/ { core::mem::transmute::<usize, fn(");
                 for param in ftyp.params() {
                     write!(dst, "{},", type_str(*param)).unwrap();
                 }
@@ -503,11 +509,15 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                     dst.push_str(" -> ");
                     dst.push_str(type_str(rtype));
                 }
-                write!(dst, ">(TABLE.with(|t| t[s{} as usize]))(", sid + ftyp.params().len()).unwrap();
+                dst.push_str(">(f) };\n");
+                write_indent(dst, n_indent + 1);
+                dst.push_str("f(");
                 for i in sid..sid + ftyp.params().len() {
                     write!(dst, "s{},", i).unwrap();
                 }
-                dst.push_str(");\n");
+                dst.push_str(")\n");
+                write_indent(dst, n_indent);
+                dst.push_str("};\n");
                 if let Some(_) = ftyp.return_type() {
                     resize_stack(&mut sid, &labels, 0, 1);
                 }
@@ -675,6 +685,7 @@ fn read_symbol_map(module: &parity_wasm::elements::Module) -> SymbolMap {
 }
 
 fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
+    let funcs = module.function_section().unwrap().entries();
     let size = match module.table_section() {
         Some(tables) => match tables.entries() {
             [table] => table.limits().initial() as usize,
@@ -697,12 +708,13 @@ fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements
     }
 
     write_indent(dst, n_indent);
-    write!(dst, "static TABLE: [usize; {}] = [\n", size).unwrap();
+    write!(dst, "static TABLE: [(u32, usize); {}] = [\n", size).unwrap();
     for i in content.iter() {
+        let tid = funcs[*i as usize].type_ref();
         write_indent(dst, n_indent + 1);
         match symbols.functions.get(i) {
-            Some(v) => write!(dst, "{} as usize,\n", v).unwrap(),
-            None => write!(dst, "f{} as usize,\n", i).unwrap(),
+            Some(v) => write!(dst, "({}, {} as usize),\n", tid, v).unwrap(),
+            None => write!(dst, "({}, f{} as usize),\n", tid, i).unwrap(),
         }
     }
     write_indent(dst, n_indent);
@@ -763,13 +775,7 @@ fn write_functions(dst: &mut String, module: &parity_wasm::elements::Module, sym
         for local in body.locals() {
             for _ in 0..local.count() {
                 write_indent(dst, 1);
-                write!(
-                    dst,
-                    "let mut v{}: {} = core::mem::uninitialized();\n",
-                    local_idx,
-                    type_str(local.value_type())
-                )
-                .unwrap();
+                write!(dst, "let mut v{} = 0{};\n", local_idx, type_str(local.value_type())).unwrap();
                 local_idx += 1;
             }
         }
