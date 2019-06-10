@@ -25,7 +25,7 @@ fn official() {
     compile("test_data/if.wasm");
     compile("test_data/br.wasm");
     compile("test_data/br_if.wasm");
-    //compile("test_data/const.wasm");
+    compile("test_data/const.wasm");
 }
 
 #[test]

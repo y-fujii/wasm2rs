@@ -14,6 +14,11 @@ macro_rules! write_line {
     }};
 }
 
+#[derive(Debug)]
+struct SymbolMap {
+    functions: collections::HashMap<u32, String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LabelType {
     Block,
@@ -161,6 +166,7 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
     mut inst_it: T,
     coarity: usize,
     module: &parity_wasm::elements::Module,
+    symbols: &SymbolMap,
 ) {
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
@@ -467,7 +473,10 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 if let Some(_) = ftyp.return_type() {
                     write!(dst, "let s{} = ", sid).unwrap();
                 }
-                write!(dst, "f{}(", n).unwrap();
+                match symbols.functions.get(n) {
+                    Some(v) => write!(dst, "{}(", v).unwrap(),
+                    None => write!(dst, "f{}(", n).unwrap(),
+                }
                 for i in sid..sid + ftyp.params().len() {
                     write!(dst, "s{},", i).unwrap();
                 }
@@ -627,7 +636,45 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
     }
 }
 
-fn write_module(dst: &mut String, module: &parity_wasm::elements::Module) {
+fn read_symbol_map(module: &parity_wasm::elements::Module) -> SymbolMap {
+    let mut symbols = SymbolMap {
+        functions: collections::HashMap::new(),
+    };
+
+    if let Some(imports) = module.import_section() {
+        for entry in imports.entries() {
+            let field = format!("_{}", entry.field().replace(|c| !char::is_alphanumeric(c), "_"));
+            match entry.external() {
+                parity_wasm::elements::External::Function(i) => {
+                    let _r = symbols.functions.insert(*i, field);
+                    assert!(_r.is_none());
+                }
+                parity_wasm::elements::External::Table(_) => (),
+                parity_wasm::elements::External::Memory(_) => (),
+                parity_wasm::elements::External::Global(_) => (),
+            }
+        }
+    }
+
+    if let Some(exports) = module.export_section() {
+        for entry in exports.entries() {
+            let field = format!("_{}", entry.field().replace(|c| !char::is_alphanumeric(c), "_"));
+            match entry.internal() {
+                parity_wasm::elements::Internal::Function(i) => {
+                    let _r = symbols.functions.insert(*i, field);
+                    assert!(_r.is_none());
+                }
+                parity_wasm::elements::Internal::Table(_) => (),
+                parity_wasm::elements::Internal::Memory(_) => (),
+                parity_wasm::elements::Internal::Global(_) => (),
+            }
+        }
+    }
+
+    symbols
+}
+
+fn write_globals(dst: &mut String, module: &parity_wasm::elements::Module, _: &SymbolMap) {
     if let Some(globals) = module.global_section() {
         for (i, global) in globals.entries().iter().enumerate() {
             write!(dst, "static").unwrap();
@@ -645,7 +692,9 @@ fn write_module(dst: &mut String, module: &parity_wasm::elements::Module) {
             }
         }
     }
+}
 
+fn write_functions(dst: &mut String, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
     let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
     let codes = module.code_section().unwrap().bodies();
@@ -657,7 +706,10 @@ fn write_module(dst: &mut String, module: &parity_wasm::elements::Module) {
         assert!(ftyp.form() == 0x60);
 
         // function declaration.
-        write!(dst, "\nunsafe fn f{}(", i).unwrap();
+        match symbols.functions.get(&(i as u32)) {
+            Some(v) => write!(dst, "\npub unsafe fn {}(", v).unwrap(),
+            None => write!(dst, "\nunsafe fn f{}(", i).unwrap(),
+        }
         let mut local_idx = 0;
         for param in ftyp.params() {
             write!(dst, "mut v{}: {}", local_idx, type_str(*param)).unwrap();
@@ -688,7 +740,7 @@ fn write_module(dst: &mut String, module: &parity_wasm::elements::Module) {
             }
         }
         let coarity = if let Some(_) = ftyp.return_type() { 1 } else { 0 };
-        write_code(dst, body.code().elements().iter(), coarity, &module);
+        write_code(dst, body.code().elements().iter(), coarity, &module, &symbols);
     }
 }
 
@@ -700,7 +752,12 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
     dst.push_str("#![allow(unused_assignments)]\n");
     dst.push_str("#![allow(unused_variables)]\n");
     dst.push_str("#![allow(dead_code)]\n");
+    dst.push_str("#![allow(non_snake_case)]\n");
     dst.push_str("\n");
-    write_module(&mut dst, &module);
+
+    let symbols = read_symbol_map(&module);
+    write_globals(&mut dst, &module, &symbols);
+    write_functions(&mut dst, &module, &symbols);
+
     Ok(dst)
 }
