@@ -235,67 +235,67 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             }
             Instruction::I32Load8S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i8>({} + s{}) as i32", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i8>({} + s{} as u32) as i32", ofs, sid - 1);
             }
             Instruction::I32Load8U(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<u8>({} + s{}) as i32", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<u8>({} + s{} as u32) as i32", ofs, sid - 1);
             }
             Instruction::I32Load16S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i16>({} + s{}) as i32", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i16>({} + s{} as u32) as i32", ofs, sid - 1);
             }
             Instruction::I32Load16U(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<u16>({} + s{}) as i32", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<u16>({} + s{} as u32) as i32", ofs, sid - 1);
             }
             Instruction::I32Load(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i32>({} + s{})", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i32>({} + s{} as u32)", ofs, sid - 1);
             }
             Instruction::I64Load8S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i8>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i8>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load8U(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<u8>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<u8>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load16S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i16>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i16>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load16U(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<u16>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<u16>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load32S(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i32>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i32>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load32U(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<u32>({} + s{}) as i64", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<u32>({} + s{} as u32) as i64", ofs, sid - 1);
             }
             Instruction::I64Load(_, ofs) => {
                 resize_stack(&mut sid, &labels, 1, 1);
-                write_line!(dst, n_indent, "let s{1} = load::<i64>({} + s{})", ofs, sid - 1);
+                write_line!(dst, n_indent, "let s{1} = load::<i64>({} + s{} as u32)", ofs, sid - 1);
             }
             Instruction::I32Store8(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{}, s{} as i8)", ofs, sid, sid + 1);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i8)", ofs, sid, sid + 1);
             }
             Instruction::I32Store16(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{}, s{} as i16)", ofs, sid, sid + 1);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i16)", ofs, sid, sid + 1);
             }
             Instruction::I32Store(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{}, s{})", ofs, sid, sid + 1);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{})", ofs, sid, sid + 1);
             }
             Instruction::I64Store(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{}, s{})", ofs, sid, sid + 1);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{})", ofs, sid, sid + 1);
             }
             Instruction::TeeLocal(i) => {
                 resize_stack(&mut sid, &labels, 1, 1);
@@ -840,6 +840,7 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
         #![allow(unused_assignments)]\n\
         #![allow(unused_variables)]\n\
         #![allow(non_snake_case)]\n\
+        #![allow(dead_code)]\n\
         \n\
     ");
 
@@ -854,8 +855,8 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
         dst.push_str("\
             \n\
             #[inline(always)]\n\
-            fn load<T: Copy>(i: i32) -> T {\n\
-            \tlet i = i as u32 as usize;\n\
+            fn load<T: Copy>(i: u32) -> T {\n\
+            \tlet i = i as usize;\n\
             \tlet j = i + core::mem::size_of::<T>();\n\
             \tMEMORY.with(|m| unsafe {\n\
             \t\t*((*m.get())[i..j].as_ptr() as *const T)\n\
@@ -863,8 +864,8 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
             }\n\
             \n\
             #[inline(always)]\n\
-            fn store<T: Copy>(i: i32, v: T) {\n\
-            \tlet i = i as u32 as usize;\n\
+            fn store<T: Copy>(i: u32, v: T) {\n\
+            \tlet i = i as usize;\n\
             \tlet j = i + core::mem::size_of::<T>();\n\
             \tMEMORY.with(|m| unsafe {\n\
             \t\t*((*m.get())[i..j].as_mut_ptr() as *mut T) = v;\n\

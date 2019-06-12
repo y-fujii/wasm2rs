@@ -6,3 +6,7 @@ edition = "2018"
 
 [dependencies]
 parity-wasm = "*"
+
+[dev-dependencies]
+serde_json = "*"
+tempfile = "*"
