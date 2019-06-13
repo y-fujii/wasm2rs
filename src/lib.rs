@@ -1,3 +1,4 @@
+// (c) Yasuhiro Fujii <http://mimosa-pudica.net>, under MIT License.
 pub use parity_wasm::elements::Error;
 use parity_wasm::elements::{BlockType, Instruction, ValueType};
 use std::fmt::Write;
