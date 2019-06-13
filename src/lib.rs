@@ -35,6 +35,21 @@ struct Label {
     sid: usize,
 }
 
+fn type_sig(ty: &parity_wasm::elements::Type) -> u64 {
+    let ty = match ty {
+        parity_wasm::elements::Type::Function(t) => t,
+    };
+    let mut sig = match ty.return_type() {
+        Some(t) => 1 + t as u64,
+        None => 0,
+    };
+    assert!(ty.params().len() <= 64 / 3 - 1);
+    for t in ty.params() {
+        sig = (sig << 3) + (1 + *t as u64);
+    }
+    sig
+}
+
 fn type_str(v: parity_wasm::elements::ValueType) -> &'static str {
     match v {
         ValueType::I32 => "i32",
@@ -289,11 +304,10 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 2, 0);
                 write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i16)", ofs, sid, sid + 1);
             }
-            Instruction::I32Store(_, ofs) => {
-                resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{} as u32, s{})", ofs, sid, sid + 1);
-            }
-            Instruction::I64Store(_, ofs) => {
+            Instruction::I32Store(_, ofs)
+            | Instruction::I64Store(_, ofs)
+            | Instruction::F32Store(_, ofs)
+            | Instruction::F64Store(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
                 write_line!(dst, n_indent, "store({} + s{} as u32, s{})", ofs, sid, sid + 1);
             }
@@ -499,7 +513,7 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 write_indent(dst, n_indent + 1);
                 write!(dst, "let (t, f) = TABLE.with(|t| t[s{} as usize]);\n", sid + ftyp.params().len()).unwrap();
                 write_indent(dst, n_indent + 1);
-                write!(dst, "assert!(t == {});\n", n).unwrap();
+                write!(dst, "assert!(t == {});\n", type_sig(&types[*n as usize])).unwrap();
                 write_indent(dst, n_indent + 1);
                 dst.push_str("let f = unsafe { core::mem::transmute::<usize, fn(");
                 for param in ftyp.params() {
@@ -729,6 +743,7 @@ fn write_memory(dst: &mut String, n_indent: usize, module: &parity_wasm::element
 }
 
 fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
+    let types = module.type_section().unwrap().types();
     let funcs = module.function_section().unwrap().entries();
     let size = match module.table_section() {
         Some(tables) => match tables.entries() {
@@ -754,11 +769,11 @@ fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements
     write_indent(dst, n_indent);
     write!(dst, "static TABLE: [(i32, usize); {}] = [\n", size).unwrap();
     for i in content.iter() {
-        let tid = funcs[*i as usize].type_ref();
+        let sig = type_sig(&types[funcs[*i as usize].type_ref() as usize]);
         write_indent(dst, n_indent + 1);
         match symbols.functions.get(i) {
-            Some(v) => write!(dst, "({}, {} as usize),\n", tid, v).unwrap(),
-            None => write!(dst, "({}, f{} as usize),\n", tid, i).unwrap(),
+            Some(v) => write!(dst, "({}, {} as usize),\n", sig, v).unwrap(),
+            None => write!(dst, "({}, f{} as usize),\n", sig, i).unwrap(),
         }
     }
     write_indent(dst, n_indent);
