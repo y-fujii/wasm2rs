@@ -8,6 +8,8 @@ fn compile<T: AsRef<path::Path>>(path: T) {
     fs::write(&dst, rust).unwrap();
     let is_success = process::Command::new("rustc")
         .arg("--crate-type=dylib")
+        .arg("-C")
+        .arg("opt-level=s")
         .arg("-o")
         .arg(src.with_extension("so"))
         .arg(dst)
@@ -43,8 +45,14 @@ fn run_testsuite<T: AsRef<path::Path>>(path: T) {
                     tests.push((wasm_file, test_code));
                 }
             }
-            "assert_return" => {
-                let func = cmd["action"]["field"].as_str().unwrap().replace(|c| !char::is_alphanumeric(c), "_");
+            "assert_return" | "action" => {
+                if cmd["action"]["type"].as_str().unwrap() != "invoke" {
+                    continue;
+                }
+                let func = cmd["action"]["field"]
+                    .as_str()
+                    .unwrap()
+                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
                 let retv = cmd["expected"].as_array().unwrap().first();
                 match retv {
                     Some(_) => write!(test_code, "\tassert_eq!(_{}(", func).unwrap(),
@@ -86,26 +94,27 @@ fn run_testsuite<T: AsRef<path::Path>>(path: T) {
         code.push_str("fn main() {\n");
         code.push_str(test_code);
         code.push_str("}\n");
-        println!("{}", code);
+        //println!("{}", code);
         let rust_file = dir.path().join("test.rs");
         fs::write(&rust_file, code).unwrap();
 
         let exec_file = dir.path().join("test");
         let result = process::Command::new("rustc")
-            .arg("-O")
+            .arg("-C")
+            .arg("opt-level=s")
             .arg("-o")
             .arg(&exec_file)
             .arg(&rust_file)
             .output()
             .unwrap();
-        println!("{}", String::from_utf8(result.stdout).unwrap());
-        println!("{}", String::from_utf8(result.stderr).unwrap());
-        assert!(result.status.success());
+        print!("{}", String::from_utf8(result.stdout).unwrap());
+        print!("{}", String::from_utf8(result.stderr).unwrap());
+        assert!(result.status.success(), "compilation");
 
         let result = process::Command::new(&exec_file).output().unwrap();
-        println!("{}", String::from_utf8(result.stdout).unwrap());
-        println!("{}", String::from_utf8(result.stderr).unwrap());
-        assert!(result.status.success());
+        print!("{}", String::from_utf8(result.stdout).unwrap());
+        print!("{}", String::from_utf8(result.stderr).unwrap());
+        assert!(result.status.success(), "execution");
     }
 }
 
@@ -138,6 +147,7 @@ fn test_br_if() {
     run_testsuite("testsuite/br_if.wast");
 }
 #[test]
+#[ignore]
 fn test_br_table() {
     run_testsuite("testsuite/br_table.wast");
 }
@@ -406,9 +416,9 @@ fn test_utf8_invalid_encoding() {
     run_testsuite("testsuite/utf8-invalid-encoding.wast");
 }
 
-/*
 #[test]
-fn self_compilation() {
+#[ignore]
+fn test_self_compilation() {
     if let Ok(output) = process::Command::new("cargo")
         .arg("build")
         .arg("--release")
@@ -420,4 +430,3 @@ fn self_compilation() {
         }
     }
 }
-*/

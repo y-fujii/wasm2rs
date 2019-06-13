@@ -205,6 +205,10 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = grow(s{})", sid - 1);
             }
+            Instruction::CurrentMemory(0) => {
+                resize_stack(&mut sid, &labels, 0, 1);
+                write_line!(dst, n_indent, "let s{0} = size()", sid - 1);
+            }
             Instruction::Select => {
                 resize_stack(&mut sid, &labels, 3, 1);
                 write_line!(
@@ -296,13 +300,13 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{1} = load::<i64>({} + s{} as u32)", ofs, sid - 1);
             }
-            Instruction::I32Store8(_, ofs) => {
-                resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i8)", ofs, sid, sid + 1);
+            Instruction::F32Load(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = load::<f32>({} + s{} as u32)", ofs, sid - 1);
             }
-            Instruction::I32Store16(_, ofs) => {
-                resize_stack(&mut sid, &labels, 2, 0);
-                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i16)", ofs, sid, sid + 1);
+            Instruction::F64Load(_, ofs) => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{1} = load::<f64>({} + s{} as u32)", ofs, sid - 1);
             }
             Instruction::I32Store(_, ofs)
             | Instruction::I64Store(_, ofs)
@@ -310,6 +314,18 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             | Instruction::F64Store(_, ofs) => {
                 resize_stack(&mut sid, &labels, 2, 0);
                 write_line!(dst, n_indent, "store({} + s{} as u32, s{})", ofs, sid, sid + 1);
+            }
+            Instruction::I32Store8(_, ofs) | Instruction::I64Store8(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i8)", ofs, sid, sid + 1);
+            }
+            Instruction::I32Store16(_, ofs) | Instruction::I64Store16(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i16)", ofs, sid, sid + 1);
+            }
+            Instruction::I64Store32(_, ofs) => {
+                resize_stack(&mut sid, &labels, 2, 0);
+                write_line!(dst, n_indent, "store({} + s{} as u32, s{} as i32)", ofs, sid, sid + 1);
             }
             Instruction::TeeLocal(i) => {
                 resize_stack(&mut sid, &labels, 1, 1);
@@ -391,6 +407,10 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 2, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} / s{}", sid - 1, sid);
             }
+            Instruction::I32RemS | Instruction::I64RemS => {
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.wrapping_rem(s{})", sid - 1, sid);
+            }
             Instruction::I32And | Instruction::I64And => {
                 resize_stack(&mut sid, &labels, 2, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} & s{}", sid - 1, sid);
@@ -413,7 +433,19 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
             }
             Instruction::I32Rotl | Instruction::I64Rotl => {
                 resize_stack(&mut sid, &labels, 2, 1);
-                write_line!(dst, n_indent, "let s{0} = s{}.rotate_left({} as u32)", sid - 1, sid);
+                write_line!(dst, n_indent, "let s{0} = s{}.rotate_left(s{} as u32)", sid - 1, sid);
+            }
+            Instruction::I32Rotr | Instruction::I64Rotr => {
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.rotate_right(s{} as u32)", sid - 1, sid);
+            }
+            Instruction::I32Popcnt => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.count_ones() as i32", sid - 1);
+            }
+            Instruction::I64Popcnt => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.count_ones() as i64", sid - 1);
             }
             Instruction::I32DivU => {
                 resize_stack(&mut sid, &labels, 2, 1);
@@ -451,6 +483,62 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{} as u32 as i64", sid - 1);
             }
+            Instruction::I32TruncSF32 | Instruction::I32TruncSF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as i32", sid - 1);
+            }
+            Instruction::I32TruncUF32 | Instruction::I32TruncUF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u32 as i32", sid - 1);
+            }
+            Instruction::I64TruncSF32 | Instruction::I64TruncSF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as i64", sid - 1);
+            }
+            Instruction::I64TruncUF32 | Instruction::I64TruncUF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u64 as i64", sid - 1);
+            }
+            Instruction::F32ConvertSI32 | Instruction::F32ConvertSI64 | Instruction::F32DemoteF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as f32", sid - 1);
+            }
+            Instruction::F32ConvertUI32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u32 as f32", sid - 1);
+            }
+            Instruction::F32ConvertUI64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u64 as f32", sid - 1);
+            }
+            Instruction::F64ConvertSI32 | Instruction::F64ConvertSI64 | Instruction::F64PromoteF32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as f64", sid - 1);
+            }
+            Instruction::F64ConvertUI32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u32 as f64", sid - 1);
+            }
+            Instruction::F64ConvertUI64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{} as u64 as f64", sid - 1);
+            }
+            Instruction::I32ReinterpretF32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = f32::to_bits(s{}) as i32", sid - 1);
+            }
+            Instruction::F32ReinterpretI32 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = f32::from_bits(s{} as u32)", sid - 1);
+            }
+            Instruction::I64ReinterpretF64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = f64::to_bits(s{}) as i64", sid - 1);
+            }
+            Instruction::F64ReinterpretI64 => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = f64::from_bits(s{} as u64)", sid - 1);
+            }
             Instruction::I32Ctz => {
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.trailing_zeros() as i32", sid - 1);
@@ -475,9 +563,44 @@ fn write_code<'a, T: Iterator<Item = &'a parity_wasm::elements::Instruction>>(
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = (s{} == 0i64) as i32", sid - 1);
             }
+            Instruction::F32Abs | Instruction::F64Abs => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.abs()", sid - 1);
+            }
+            Instruction::F32Ceil | Instruction::F64Ceil => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.ceil()", sid - 1);
+            }
+            Instruction::F32Floor | Instruction::F64Floor => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.floor()", sid - 1);
+            }
+            Instruction::F32Trunc | Instruction::F64Trunc => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.trunc()", sid - 1);
+            }
+            Instruction::F32Nearest | Instruction::F64Nearest => {
+                resize_stack(&mut sid, &labels, 1, 1);
+                // XXX
+                write_line!(dst, n_indent, "let s{0} = s{}.round()", sid - 1);
+            }
             Instruction::F32Sqrt | Instruction::F64Sqrt => {
                 resize_stack(&mut sid, &labels, 1, 1);
                 write_line!(dst, n_indent, "let s{0} = s{}.sqrt()", sid - 1);
+            }
+            Instruction::F32Min | Instruction::F64Min => {
+                resize_stack(&mut sid, &labels, 2, 1);
+                // XXX
+                write_line!(dst, n_indent, "let s{0} = s{}.min(s{})", sid - 1, sid);
+            }
+            Instruction::F32Max | Instruction::F64Max => {
+                resize_stack(&mut sid, &labels, 2, 1);
+                // XXX
+                write_line!(dst, n_indent, "let s{0} = s{}.max(s{})", sid - 1, sid);
+            }
+            Instruction::F32Copysign | Instruction::F64Copysign => {
+                resize_stack(&mut sid, &labels, 2, 1);
+                write_line!(dst, n_indent, "let s{0} = s{}.copysign(s{})", sid - 1, sid);
             }
             Instruction::Call(n) => {
                 let ftyp = match &types[funcs[*n as usize].type_ref() as usize] {
@@ -666,24 +789,9 @@ fn read_symbol_map(module: &parity_wasm::elements::Module) -> SymbolMap {
         functions: collections::HashMap::new(),
     };
 
-    if let Some(imports) = module.import_section() {
-        for entry in imports.entries() {
-            let field = format!("_{}", entry.field().replace(|c| !char::is_alphanumeric(c), "_"));
-            match entry.external() {
-                parity_wasm::elements::External::Function(i) => {
-                    let _r = symbols.functions.insert(*i, field);
-                    assert!(_r.is_none());
-                }
-                parity_wasm::elements::External::Table(_) => (),
-                parity_wasm::elements::External::Memory(_) => (),
-                parity_wasm::elements::External::Global(_) => (),
-            }
-        }
-    }
-
     if let Some(exports) = module.export_section() {
         for entry in exports.entries() {
-            let field = format!("_{}", entry.field().replace(|c| !char::is_alphanumeric(c), "_"));
+            let field = format!("_{}", entry.field().replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
             match entry.internal() {
                 parity_wasm::elements::Internal::Function(i) => {
                     let _r = symbols.functions.insert(*i, field);
@@ -743,8 +851,6 @@ fn write_memory(dst: &mut String, n_indent: usize, module: &parity_wasm::element
 }
 
 fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
-    let types = module.type_section().unwrap().types();
-    let funcs = module.function_section().unwrap().entries();
     let size = match module.table_section() {
         Some(tables) => match tables.entries() {
             [table] => table.limits().initial() as usize,
@@ -752,6 +858,8 @@ fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements
         },
         None => return,
     };
+    let types = module.type_section().unwrap().types();
+    let funcs = module.function_section().unwrap().entries();
     let mut content = vec![0; size];
 
     if let Some(elems) = module.elements_section() {
@@ -782,10 +890,10 @@ fn write_table(dst: &mut String, n_indent: usize, module: &parity_wasm::elements
 
 fn write_globals(dst: &mut String, n_indent: usize, module: &parity_wasm::elements::Module, _: &SymbolMap) {
     let globals = match module.global_section() {
-        Some(e) => e,
+        Some(e) => e.entries(),
         None => return,
     };
-    for (i, global) in globals.entries().iter().enumerate() {
+    for (i, global) in globals.iter().enumerate() {
         write_indent(dst, n_indent);
         let ty = global.global_type().content_type();
         write!(dst, "static G{}: core::cell::Cell<{}> = core::cell::Cell::new(", i, type_str(ty)).unwrap();
@@ -800,8 +908,11 @@ fn write_globals(dst: &mut String, n_indent: usize, module: &parity_wasm::elemen
 }
 
 fn write_functions(dst: &mut String, module: &parity_wasm::elements::Module, symbols: &SymbolMap) {
+    let funcs = match module.function_section() {
+        Some(e) => e.entries(),
+        None => return,
+    };
     let types = module.type_section().unwrap().types();
-    let funcs = module.function_section().unwrap().entries();
     let codes = module.code_section().unwrap().bodies();
     assert!(funcs.len() == codes.len());
     for (i, (func, body)) in funcs.iter().zip(codes).enumerate() {
@@ -892,6 +1003,15 @@ pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<St
             \tMEMORY.with(|m| unsafe {\n\
             \t\tlet len = (*m.get()).len();\n\
             \t\t(*m.get()).resize(len + 65536 * n as u32 as usize, 0);\n\
+            \t\tassert!(len % 65536 == 0);\n\
+            \t\t(len / 65536) as u32 as i32\n\
+            \t})\n\
+            }\n\
+            \n\
+            #[inline(always)]\n\
+            fn size() -> i32 {\n\
+            \tMEMORY.with(|m| unsafe {\n\
+            \t\tlet len = (*m.get()).len();\n\
             \t\tassert!(len % 65536 == 0);\n\
             \t\t(len / 65536) as u32 as i32\n\
             \t})\n\
