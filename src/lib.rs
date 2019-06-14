@@ -955,8 +955,8 @@ fn write_functions(dst: &mut String, module: &parity_wasm::elements::Module, sym
     }
 }
 
-pub fn wasm_to_rust<T: convert::AsRef<path::Path>>(path: T) -> result::Result<String, Error> {
-    let module = parity_wasm::deserialize_file(path)?;
+pub fn wasm_to_rust(content: &[u8]) -> result::Result<String, Error> {
+    let module = parity_wasm::deserialize_buffer(content)?;
     let symbols = read_symbol_map(&module);
 
     let mut dst = String::new();

@@ -5,7 +5,7 @@ use std::*;
 fn compile<T: AsRef<path::Path>>(path: T) {
     let src = path.as_ref();
     let dst = src.with_extension("rs");
-    let rust = wasm2rs::wasm_to_rust(src).unwrap();
+    let rust = wasm2rs::wasm_to_rust(&fs::read(src).unwrap()).unwrap();
     fs::write(&dst, rust).unwrap();
     let is_success = process::Command::new("rustc")
         .arg("--crate-type=dylib")
@@ -90,7 +90,7 @@ fn run_testsuite<T: AsRef<path::Path>>(path: T) {
     }
 
     for (wasm_file, test_code) in tests.iter() {
-        let mut code = wasm2rs::wasm_to_rust(&wasm_file).unwrap();
+        let mut code = wasm2rs::wasm_to_rust(&fs::read(&wasm_file).unwrap()).unwrap();
         code.push_str("\n");
         code.push_str("fn main() {\n");
         code.push_str(test_code);
